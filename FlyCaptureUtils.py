@@ -258,7 +258,7 @@ class Camera(object):
         See also
         --------
         * .startCapture() - must be called prior to acquiring any image.
-        * .openVideoWriter() - allows frames to be written to video file.        
+        * .openVideoWriter() - allows frames to be written to video file.
         * img2array() - converts returned images to numpy arrays that
           can, for example, be used for a live display.
         """
@@ -290,7 +290,8 @@ class Camera(object):
         Parameters
         ----------
         filename : str
-            Path to desired output file
+            Path to desired output file. If extension is omitted it will be
+            inferred from <file_format> (if specified).
         file_format : str { 'AVI' | 'MJPG' | 'H264' } or None, optional
             Output format to use. If None, will automatically set to 'AVI'
             if filename ends with an '.avi' extension, 'H264' if filename
@@ -306,10 +307,6 @@ class Camera(object):
             These are necessary for the MJPG and H264 formats - see PyCapture2
             documention.
         """
-        # Without overwrite, error if file exists
-        if not overwrite and os.path.isfile(filename):
-            raise OSError(f'Output file {filename} already exists')
-
         # Try to auto-determine file format if unspecified
         if file_format is None:
             ext = os.path.splitext(filename)[1].lower()  # case insensitive
@@ -317,6 +314,9 @@ class Camera(object):
                 file_format = 'AVI'
             elif ext == '.mp4':
                 file_format = 'H264'
+            elif not ext:
+                raise ValueError('Cannot determine file_format automatically '
+                                 'without file extension')
             else:
                 raise ValueError('Cannot determine file_format automatically '
                                  f'from {ext} extension')
@@ -327,6 +327,17 @@ class Camera(object):
         if not file_format in ['AVI', 'MJPG', 'H264']:
             raise ValueError("file_format must be  'AVI', 'MJPG', or 'H264, "
                              f"but received {file_format}")
+
+        # Auto-determine file extension if necessary
+        if not os.path.splitext(filename)[1]:
+            if file_format in ['AVI','MJPG']:
+                filename += '.avi'
+            elif file_format == 'H264':
+                filename += '.mp4'
+
+        # Without overwrite, error if file exists
+        if not overwrite and os.path.isfile(filename):
+            raise OSError(f'Output file {filename} already exists')
 
         # Grab framerate from camera properties
         framerate = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
