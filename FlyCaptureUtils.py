@@ -5,6 +5,7 @@ cameras, using the PyCapture2 python bindings to the FlyCapture2 SDK.
 """
 
 import os
+import warnings
 import traceback
 import PyCapture2
 
@@ -19,15 +20,14 @@ def enum2dict(obj, key_filter=None):
     obj : class
         A PyCapture2.<ENUMERATED VALUE> class
     key_filter : callable, optional
-        A callable returning a boolean value that can be used to filter the
-        keys of the dict. Entries for which the corresponding keys return
-        False will be remoed.
+        A callable returning a boolean that can be used to filter the keys of
+        the dict. Entries for which the callable return False will be removed.
 
     Returns
     -------
     D : dict
         Attribute names and values as the dictionary's keys and values.
-    
+
     Examples
     --------
     >>> D = enum2dict(PyCapture2.VIDEO_MODE, lambda k: k.startswith('VM_'))
@@ -55,7 +55,7 @@ def img2array(img):
     return img.convert(PyCapture2.PIXEL_FORMAT.BGR) \
         .getData().reshape(img.getRows(), img.getCols(), 3)
 
-def get_available_cameras(bus=None, camNums=None):
+def getAvailableCameras(bus=None, camNums=None):
     """
     List indices and serial numbers of available cameras.
 
@@ -70,7 +70,7 @@ def get_available_cameras(bus=None, camNums=None):
     Returns
     -------
     serial_nums : list
-        List of (idx, serialNum) tuples. 
+        List of (idx, serialNum) tuples.
     """
     if bus is None:
         bus = PyCapture2.BusManager()
@@ -78,20 +78,42 @@ def get_available_cameras(bus=None, camNums=None):
         camNums = range(bus.getNumOfCameras())
     return [(i, bus.getCameraSerialNumberFromIndex(i)) for i in camNums]
 
-def list_available_modes(cam):
+def listAvailableModes(cam_num=None, cam=None, bus=None):
     """
     List valid video modes and framerates for specified camera.
 
     Parameters
     ----------
-    cam : PyCapture2.Camera instance
-        Handle to camera connection.
+    cam_num : int, optional
+        Index of camera to connect to. Cannot be specified alongside <cam>,
+        and must be specified if <cam> is not.
+    cam : PyCapture2.Camera instance, optional
+        Handle to camera connection. Cannot be specified alongisde <cam_num>,
+        and must be specified if <cam_num> is not.
+    bus : PyCapture2.BusManager instance, optional
+        Only relevant if <cam> is None / <cam_num> is not None. Bus manager
+        to connect camera. If None (default), one will be created.
 
     Returns
     -------
     res : list
         List of (mode, framerate) tuples giving all valid options.
     """
+
+    # Ensure one of cam_num or cam is specified
+    if cam_num is None and cam is None:
+        raise ValueError('Must specify cam_num or cam')
+    elif cam_num is not None and cam is not None:
+        raise ValueError('Can only specify one of cam_num or cam')
+
+    # If no cam given, create one from index. Also create bus if needed.
+    if cam is None:
+        cam = PyCapture2.Camera()
+        if bus is None:
+            bus = PyCapture2.BusManager()
+        cam.connect(bus.getCameraFromIndex(cam_num))
+
+    # Find and return compatible modes
     res = []
     for modename, modeval in VIDEO_MODES.items():
         for ratename, rateval in FRAMERATES.items():
@@ -113,36 +135,62 @@ class Camera(object):
         Parameters
         ----------
         cam_num : int
-            Index of camera to use. See also the get_available_cameras()
+            Index of camera to use. See also the getAvailableCameras()
             function.
         bus : PyCapture2.BusManager, optional
             Bus manager object. If None (default), one will be created.
         video_mode : PyCapture2.VIDEO_MODE value or str, optional
-            Determines the resolution and colour mode of video capture.
-            Can be one of the PyCapture2.VIDEO_MODE.* values or a key for
-            the VIDEO_MODES lookup dict. The default is 'VM_640x480RGB'.
-            See also the list_available_modes() function.
+            Determines the resolution and colour mode of video capture. Can be
+            one of the PyCapture2.VIDEO_MODE codes, or a key for the
+            VIDEO_MODES lookup dict. The default is 'VM_640x480RGB'. See also
+            the listAvailableModes() function.
         framerate : PyCapture2.FRAMERATE value or str, optional
             Determines the frame rate of the video. Note that this is NOT the
             actual fps value, but the code PyCapture uses to determine it.
-            Can be one of the PyCapture2.FRAMERATE.* values or a key for the
-            FRAMERATES lookup dict. The default is 'FR_30'.
-            See also the list_available_modes() function.
+            Can be one of the PyCapture2.FRAMERATE codes, or a key for the
+            FRAMERATES lookup dict. The default is 'FR_30'. See also the
+            listAvailableModes() function.
         grab_mode : PyCapture2.GRAB_MODE value or str, optional
             Method for acquiring images from the buffer. Can be one of the
-            PyCapture2.GRAB_MODE.* values or a key for the GRAB_MODES lookup
+            PyCapture2.GRAB_MODE codes, or a key for the GRAB_MODES lookup
             dict. BUFFER_FRAMES mode (default) grabs the oldest frame from
-            the buffer each time and does not clear the buffer in between -
+            the buffer each time and does not clear the buffer in between;
             this ensures frames are not dropped, but the buffer may overflow
             if the program cannot keep up. DROP_FRAMES mode grabs the newest
-            frame from the buffer each time and clears the buffer in between -
+            frame from the buffer each time and clears the buffer in between;
             this prevents the buffer overflowing but may lead to frames
             being missed. BUFFER_FRAMES should generally be preferred for
             recording, DROP_FRAMES may be preferable for live streaming.
-            
-        Methods
-        -------
-        
+
+        Examples
+        --------
+
+        Open connection to first available camera.
+
+        >>> cam = Camera(0)
+
+        Optionally open a video file to write frames to.
+
+        >>> cam.openVideoWriter('test.avi')
+
+        Start camera capture - this must be called before acquiring images.
+
+        >>> cam.startCapture()
+
+        Acquire frames in a loop. Optionally display them in an OpenCV window.
+        If a video writer was opened, each call to .getImage() will also write
+        the frame out to the video file.
+
+        >>> for i in range(300):
+        ...     ret, img = cam.getImage()
+        ...     if ret:
+        ...         cv2.imshow('Camera', img2array(img))
+        ...         cv2.waitKey(1)
+
+        Close the camera when done. This will stop camera capture,
+        close the video writer (if applicable), and disconnect the camera.
+
+        >>> cam.close()
 
         """
         # Allocate args to class
@@ -151,7 +199,7 @@ class Camera(object):
         self.video_mode = video_mode
         self.framerate = framerate
         self.grab_mode = grab_mode
-        
+
         # Allocate further defaults where needed
         if self.bus is None:
             self.bus = PyCapture2.BusManager()
@@ -161,7 +209,7 @@ class Camera(object):
             self.framerate = FRAMERATES[self.framerate]
         if isinstance(self.grab_mode, str):
             self.grab_mode = GRAB_MODES[self.grab_mode]
-        
+
         # Init camera
         self.cam = PyCapture2.Camera()
         self.uid = self.bus.getCameraFromIndex(self.cam_num)
@@ -170,30 +218,35 @@ class Camera(object):
             raise OSError('Camera is not powered on')
         if not self.cam.isConnected:
             raise OSError('Camera faied to connect')
-        
+
         # Set mode and frame rate
         if not self.cam.getVideoModeAndFrameRateInfo(self.video_mode,
                                                      self.framerate):
             raise OSError('Video mode and / or frame rate incompatible '
                           'with camera')
         self.cam.setVideoModeAndFrameRate(self.video_mode, self.framerate)
-        
+
         # Further config
         self.cam.setConfiguration(grabMode=self.grab_mode)
-        
+
         # Place holders for video writer
         self.video_writer = None
         self.file_format = None
 
         # Internal flags
-        self._capture_isOn = False        
+        self._capture_isOn = False
         self._video_writer_isOpen = False
 
-    
-    def get_image(self):
+    def getImage(self, onError='warn'):
         """
         Acquire a single image from the camera. If a video writer has been
         opened, the frame will additionally be appended to the writer.
+
+        Parameters
+        ----------
+        onError : str { 'ignore' | 'warn' | 'error' }, optional
+            Whether to ignore, warn about, or raise any errors encountered
+            during image acquisition. The default is 'warn'.
 
         Returns
         -------
@@ -201,25 +254,33 @@ class Camera(object):
             Indicates whether capture was successful or not.
         img : PyCapture2.Image object or None
             The image object if capture was successful, or None if not.
-                    
+
         See also
         --------
-        .startCapture() - method must be called prior to acquiring any image.
-        .openVideoWriter() - method allows frames to be written to video file.
-        img2array() - function converts returned images to numpy arrays that
-            can, for example, be used for a live display.
+        * .startCapture() - must be called prior to acquiring any image.
+        * .openVideoWriter() - allows frames to be written to video file.        
+        * img2array() - converts returned images to numpy arrays that
+          can, for example, be used for a live display.
         """
+        if onError not in ['ignore','warn','error']:
+            raise ValueError(f'Invalid value {onError} to onError')
+
         success = False
         img = None
+
         try:
             img = self.cam.retrieveBuffer()
             if self.video_writer is not None:
                 self.video_writer.append(img)
             success = True
         except Exception as e:
-            print(e)
+            if onError == 'error':
+                raise e
+            elif onError == 'warn':
+                warnings.warn(e)
+
         return success, img
-    
+
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
                         *args, **kwargs):
         """
@@ -238,17 +299,17 @@ class Camera(object):
             arguments to be passed (see *args, **kwargs). The default is None.
         overwrite : bool, optional
             If False and the output file already exists, an error will be
-            raised. The default if False.
+            raised. The default is False.
         *args, **kwargs
             Additional arguments to be passed to the format-specfic
-            writer.*Open() methods (except framerate). These are necessary
-            for MJPG and H264 formats - see PyCapture2 documention.
-            DESCRIPTION.
+            PyCapture2.FlyCapture2Video.*Open() methods (except framerate).
+            These are necessary for the MJPG and H264 formats - see PyCapture2
+            documention.
         """
         # Without overwrite, error if file exists
         if not overwrite and os.path.isfile(filename):
             raise OSError(f'Output file {filename} already exists')
-        
+
         # Try to auto-determine file format if unspecified
         if file_format is None:
             ext = os.path.splitext(filename)[1].lower()  # case insensitive
@@ -260,20 +321,20 @@ class Camera(object):
                 raise ValueError('Cannot determine file_format automatically '
                                  f'from {ext} extension')
             print(f'Recording using {file_format} format')
-                
+
         file_format = file_format.upper()  # ensure case insensitive
-        
+
         if not file_format in ['AVI', 'MJPG', 'H264']:
             raise ValueError("file_format must be  'AVI', 'MJPG', or 'H264, "
                              f"but received {file_format}")
-            
+
         # Grab framerate from camera properties
         framerate = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
 
         # Filename needs to be bytes string
         if not isinstance(filename, bytes):
             filename = filename.encode('utf-8')
-           
+
         # Initialise video writer, allocate to class
         self.video_writer = PyCapture2.FlyCapture2Video()
         self.file_format = file_format
@@ -285,7 +346,7 @@ class Camera(object):
             self.video_writer.MJPGOpen(filename, framerate, *args, **kwargs)
         elif self.file_format == 'H264':
             self.video_writer.H264Open(filename, framerate, *args, **kwargs)
-            
+
         # Success!
         self._video_writer_isOpen = True
 
@@ -303,14 +364,14 @@ class Camera(object):
         """
         self.cam.startCapture()
         self._capture_isOn = True
-            
+
     def stopCapture(self):
         """
         Stop capture from camera.
         """
         self.cam.stopCapture()
         self._capture_isOn = False
-            
+
     def close(self):
         """
         Close everything. Stops camera capture, closes video writer (if
@@ -321,15 +382,15 @@ class Camera(object):
                 self.stopCapture()
             except Exception:
                 traceback.print_exc()
-            
+
         if self.video_writer and self._video_writer_isOpen:
             try:
                 self.closeVideoWriter()
             except Exception:
                 traceback.print_exc()
-            
+
         self.cam.disconnect()
-        
+
 
 # Assorted lookup dicts storing critical PyCapture codes
 VIDEO_MODES = enum2dict(PyCapture2.VIDEO_MODE, lambda k: k.startswith('VM_'))
@@ -337,29 +398,3 @@ FRAMERATES = enum2dict(PyCapture2.FRAMERATE, lambda k: k.startswith('FR_'))
 IMAGE_FILE_FORMATS = enum2dict(PyCapture2.IMAGE_FILE_FORMAT)
 PIXEL_FORMATS = enum2dict(PyCapture2.PIXEL_FORMAT)
 GRAB_MODES = enum2dict(PyCapture2.GRAB_MODE)
-
-
-if __name__ == '__main__':
-    print('Running demo - Esc to exit')
-    
-    import cv2
-    
-    cam = Camera(0)
-    
-    #cam.openVideoWriter('test.avi')
-    
-    cam.startCapture()
-    
-    while True:
-        ret, img = cam.get_image()
-        if ret:
-            cv2.imshow('window1', img2array(img))
-        kb = cv2.waitKey(1)
-        if kb == 27:
-            break
-        
-    cam.close()
-    
-    cv2.destroyAllWindows()
-    
-    print('\nDone\n')
