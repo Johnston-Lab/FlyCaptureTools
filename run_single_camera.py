@@ -130,31 +130,12 @@ if __name__ == '__main__':
     writer_kwargs = {}
     if outfile:
         writer_kwargs['overwrite'] = args.overwrite
-
-        file_format = args.output_format
-        if file_format is None:
-            ext = os.path.splitext(outfile)[1].lower()  # case insensitive
-            if ext == '.avi':
-                file_format = 'AVI'
-            elif ext == '.mp4':
-                file_format = 'H264'
-            else:
-                raise ValueError('Cannot determine file_format automatically '
-                                 f'from {ext} extension')
-            print(f'Recording using {file_format} format')
-        writer_kwargs['file_format'] = file_format
-
-        if file_format == 'MJPG':
-            if not args.output_quality:
-                raise OSError('Must specify output quality for MJPG format')
+        writer_kwargs['file_format'] = args.output_format
+        if args.output_quality is not None:
             writer_kwargs['quality'] = args.output_quality
-        elif file_format == 'H264':
-            if not args.output_size:
-                raise OSError('Must specify output size for H264 format')
-            if not args.output_bitrate:
-                raise OSError('Must specify bitrate for H264 format')
-            writer_kwargs['width'] = args.output_size[0]
-            writer_kwargs['height'] = args.output_size[1]
+        if args.output_size is not None:
+            writer_kwargs['img_size'] = args.output_size
+        if args.output_bitrate is not None:
             writer_kwargs['bitrate'] = args.output_bitrate
 
     # Go

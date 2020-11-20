@@ -5,6 +5,7 @@ cameras, using the PyCapture2 python bindings to the FlyCapture2 SDK.
 """
 
 import os
+import re
 import warnings
 import traceback
 import PyCapture2
@@ -209,7 +210,7 @@ class Camera(object):
             self.framerate = FRAMERATES[self.framerate]
         if isinstance(self.grab_mode, str):
             self.grab_mode = GRAB_MODES[self.grab_mode]
-
+            
         # Init camera
         self.cam = PyCapture2.Camera()
         self.uid = self.bus.getCameraFromIndex(self.cam_num)
@@ -229,6 +230,23 @@ class Camera(object):
 
         # Further config
         self.cam.setConfiguration(grabMode=self.grab_mode)
+        
+        # Reverse grab image resolution out of video mode
+        try:
+            mode_key = [k for k,v in VIDEO_MODES.items() \
+                         if v == self.video_mode]
+            assert(len(mode_key)) == 1
+            mode_key = mode_key[0]
+            # E.g. split 'VM_<W>x<H>RGB' on 'x' then remove non-numeric chars
+            sz = [int(re.sub('[^0-9]', '', s)) for s in mode_key.split('x')]
+            assert(len(sz) == 2)
+            self.img_size = sz
+        except Exception:
+            warnings.warn('Unable to determine image resolution values')
+            self.img_size = None
+            
+        # Also note fps value
+        self.fps = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
 
         # Place holders for video writer
         self.video_writer = None
@@ -283,7 +301,7 @@ class Camera(object):
         return success, img
 
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
-                        *args, **kwargs):
+                        quality=75, bitrate=1000000, img_size=None):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -298,15 +316,20 @@ class Camera(object):
             if filename ends with an '.avi' extension, 'H264' if filename
             ends with a 'mp4' extension, or will raise an error for other
             extensions. Note that 'MJPG' and 'H264' formats require addtional
-            arguments to be passed (see *args, **kwargs). The default is None.
+            arguments to be passed. The default is None.
         overwrite : bool, optional
             If False and the output file already exists, an error will be
             raised. The default is False.
-        *args, **kwargs
-            Additional arguments to be passed to the format-specfic
-            PyCapture2.FlyCapture2Video.*Open() methods (except framerate).
-            These are necessary for the MJPG and H264 formats - see PyCapture2
-            documention.
+        quality : int, optional
+            Value between 0-100 determining output quality. Only applicable
+            for MJPG format. The default is 75.
+        bitrate : int, optional
+            Bitrate to encode at. Only applicable for H264 format. The default
+            is 100000.
+        img_size : (W,H) tuple of ints, optional
+            Image resolution. Only applicable for H264 format. If not given,
+            will attempt to determine from camera's video mode, but this
+            might not work. The default is None.
         """
         # Try to auto-determine file format if unspecified
         if file_format is None:
@@ -340,9 +363,6 @@ class Camera(object):
         if not overwrite and os.path.isfile(filename):
             raise OSError(f'Output file {filename} already exists')
 
-        # Grab framerate from camera properties
-        framerate = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
-
         # Filename needs to be bytes string
         if not isinstance(filename, bytes):
             filename = filename.encode('utf-8')
@@ -353,11 +373,17 @@ class Camera(object):
 
         # Open video file
         if self.file_format == 'AVI':
-            self.video_writer.AVIOpen(filename, framerate)
+            self.video_writer.AVIOpen(filename, self.fps)
         elif self.file_format == 'MJPG':
-            self.video_writer.MJPGOpen(filename, framerate, *args, **kwargs)
+            self.video_writer.MJPGOpen(filename, self.fps, quality)
         elif self.file_format == 'H264':
-            self.video_writer.H264Open(filename, framerate, *args, **kwargs)
+            if img_size is None:
+                if self.img_size is None:
+                    raise RuntimeError('Cannot determine image resolution')
+                else:
+                    img_size = self.img_size
+            W, H = img_size
+            self.video_writer.H264Open(filename, self.fps, W, H, bitrate)
 
         # Success!
         self._video_writer_isOpen = True
