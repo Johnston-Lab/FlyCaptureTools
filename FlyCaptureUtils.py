@@ -213,6 +213,7 @@ class Camera(object):
         # Init camera
         self.cam = PyCapture2.Camera()
         self.uid = self.bus.getCameraFromIndex(self.cam_num)
+        self.serial_num = self.bus.getCameraSerialNumberFromIndex(self.cam_num)
         self.cam.connect(self.uid)
         if not self.cam.getStats().cameraPowerUp:
             raise OSError('Camera is not powered on')

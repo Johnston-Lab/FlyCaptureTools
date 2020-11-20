@@ -49,7 +49,7 @@ def main(cam_num, cam_kwargs, outfile, writer_kwargs):
     cv2.namedWindow(winName)
 
     # Start capture
-    cam.start_capture()
+    cam.startCapture()
 
     # Loop
     while True:
@@ -62,7 +62,7 @@ def main(cam_num, cam_kwargs, outfile, writer_kwargs):
             break
 
     # Stop capture but finish writing frames from buffer
-    cam.stop_capture()
+    cam.stopCapture()
     while True:
         ret, img = cam.getImage()
         if not ret:
@@ -113,13 +113,13 @@ if __name__ == '__main__':
 
     if args.ls:
         print('Cam\tSerial')
-        for cam_ser in getAvailableCameras():
-            print('\t'.join(*cam_ser))
+        for num_ser in getAvailableCameras():
+            print('\t'.join(map(str, num_ser)))
         parser.exit()
 
     cam_num = args.cam_num
     cam_kwargs = {'video_mode':args.video_mode,
-                  'framerate':args.framerate,
+                  'framerate':args.frame_rate,
                   'grab_mode':args.grab_mode}
     outfile = args.output
 
