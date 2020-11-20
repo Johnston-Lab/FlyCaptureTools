@@ -4,8 +4,6 @@ Run video feed from a single camera. Shows live feed via OpenCV window,
 and provides option to record feed to file.
 """
 
-import os
-import sys
 import argparse
 import cv2
 from FlyCaptureUtils import Camera, img2array, getAvailableCameras
@@ -18,26 +16,24 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     """
     pass
 
-def main(cam_num, cam_kwargs, outfile, writer_kwargs):
+def main(cam_kwargs, outfile, writer_kwargs):
     """
     Main function.
 
     Parameters
     ----------
-    cam_num : int
-        Index of camera to use.
     cam_kwargs : dict
-        Keyword arguments (except cam_num) to Camera class.
+        Keyword arguments to Camera class.
     outfile : str or None
         Output video file.
     writer_kwargs : dict
         Keyward arguments to Camera class's .openVideoWriter() method.
     """
     # Init camera
-    cam = Camera(cam_num, **cam_kwargs)
+    cam = Camera(**cam_kwargs)
 
     # Init video writer?
-    if outfile:
+    if outfile is not None:
         cam.openVideoWriter(outfile, **writer_kwargs)
 
     # Report ready
@@ -55,18 +51,18 @@ def main(cam_num, cam_kwargs, outfile, writer_kwargs):
     while True:
         ret, img = cam.getImage()
         if ret:
-            cv2.imshow(winName, img2array(img))
+            # Possible bug fix - converting image to array TWICE seems to
+            # prevent image corruption?!
+            img2array(img)
+            arr = img2array(img)
+            cv2.imshow(winName, arr)
 
-        k = cv2.waitKey(1)
+        k = cv2.waitKey(int(1000/cam.fps))
         if k == 27:
             break
 
-    # Stop capture but finish writing frames from buffer
+    # Stop capture
     cam.stopCapture()
-    while True:
-        ret, img = cam.getImage()
-        if not ret:
-            break
 
     # Close camera and exit
     cam.close()
@@ -89,8 +85,7 @@ if __name__ == '__main__':
                         help='PyCapture2 framerate code or lookup key')
     parser.add_argument('--grab-mode', default='BUFFER_FRAMES',
                         help='PyCapture2 grab mode code or lookup key')
-    parser.add_argument('-o', '--output',
-                        help='Path to output video file')
+    parser.add_argument('-o', '--output', help='Path to output video file')
     parser.add_argument('--overwrite', action='store_true',
                         help='Overwrite an existing output file')
     parser.add_argument('--output-format', choices=['AVI','MJPG','H264'],
@@ -105,10 +100,6 @@ if __name__ == '__main__':
     parser.add_argument('--output-bitrate', type=int,
                         help='Bitrate. Only applicable for H264 format')
 
-    if not len(sys.argv) > 1:
-        parser.print_help()
-        parser.exit()
-
     args = parser.parse_args()
 
     if args.ls:
@@ -117,16 +108,19 @@ if __name__ == '__main__':
             print('\t'.join(map(str, num_ser)))
         parser.exit()
 
-    cam_num = args.cam_num
-    cam_kwargs = {'video_mode':args.video_mode,
-                  'framerate':args.frame_rate,
-                  'grab_mode':args.grab_mode}
+    if args.cam_num is None:
+        raise argparse.ArgumentTypeError('cam_num is required')
+
+    cam_kwargs = {}
+    cam_kwargs['cam_num'] = args.cam_num
+    if args.video_mode is not None:
+        cam_kwargs['video_mode'] = args.video_mode
+    if args.frame_rate is not None:
+        cam_kwargs['framerate'] = args.frame_rate
+    if args.grab_mode is not None:
+        cam_kwargs['grab_mode'] = args.grab_mode
+
     outfile = args.output
-
-    # Further checks on args
-    if cam_num is None:
-        raise OSError('Must specify cam_num')
-
     writer_kwargs = {}
     if outfile:
         writer_kwargs['overwrite'] = args.overwrite
@@ -139,4 +133,4 @@ if __name__ == '__main__':
             writer_kwargs['bitrate'] = args.output_bitrate
 
     # Go
-    main(cam_num, cam_kwargs, outfile, writer_kwargs)
+    main(cam_kwargs, outfile, writer_kwargs)
