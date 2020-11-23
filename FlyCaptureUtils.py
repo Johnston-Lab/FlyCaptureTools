@@ -9,6 +9,8 @@ import re
 import warnings
 import traceback
 import PyCapture2
+from csv import DictWriter
+
 
 def enum2dict(obj, key_filter=None):
     """
@@ -210,7 +212,7 @@ class Camera(object):
             self.framerate = FRAMERATES[self.framerate]
         if isinstance(self.grab_mode, str):
             self.grab_mode = GRAB_MODES[self.grab_mode]
-            
+
         # Init camera
         self.cam = PyCapture2.Camera()
         self.uid = self.bus.getCameraFromIndex(self.cam_num)
@@ -230,7 +232,7 @@ class Camera(object):
 
         # Further config
         self.cam.setConfiguration(grabMode=self.grab_mode)
-        
+
         # Reverse grab image resolution out of video mode
         try:
             mode_key = [k for k,v in VIDEO_MODES.items() \
@@ -244,13 +246,15 @@ class Camera(object):
         except Exception:
             warnings.warn('Unable to determine image resolution values')
             self.img_size = None
-            
+
         # Also note fps value
         self.fps = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
 
         # Place holders for video writer
         self.video_writer = None
         self.file_format = None
+        self.csv_fd = None
+        self.csv_writer = None
 
         # Internal flags
         self._capture_isOn = False
@@ -291,7 +295,10 @@ class Camera(object):
             img = self.cam.retrieveBuffer()
             if self.video_writer is not None:
                 self.video_writer.append(img)
+                if self.csv_writer is not None:
+                    self.csv_writer.writerow(img.getTimeStamp())
             success = True
+
         except Exception as e:
             if onError == 'error':
                 raise e
@@ -301,7 +308,8 @@ class Camera(object):
         return success, img
 
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
-                        quality=75, bitrate=1000000, img_size=None):
+                        quality=75, bitrate=1000000, img_size=None,
+                        save_timestamps=True):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -325,11 +333,14 @@ class Camera(object):
             for MJPG format. The default is 75.
         bitrate : int, optional
             Bitrate to encode at. Only applicable for H264 format. The default
-            is 100000.
+            is 1000000.
         img_size : (W,H) tuple of ints, optional
             Image resolution. Only applicable for H264 format. If not given,
             will attempt to determine from camera's video mode, but this
             might not work. The default is None.
+        save_timestamps : bool, optional
+            If True, timestamps for each frame will be saved to a csv file
+            corresponding to the output video file. The default is True.
         """
         # Try to auto-determine file format if unspecified
         if file_format is None:
@@ -359,9 +370,26 @@ class Camera(object):
             elif file_format == 'H264':
                 filename += '.mp4'
 
-        # Without overwrite, error if file exists
-        if not overwrite and os.path.isfile(filename):
-            raise OSError(f'Output file {filename} already exists')
+        # Without overwrite, error if file exists. AVI writer sometimes
+        # appends a bunch of zeros to name, so check that too.
+        if not overwrite:
+            _filename, ext = os.path.splitext()
+            alt_filename = _filename + '-0000' + ext
+            if os.path.isfile(filename) or os.path.isfile(alt_filename):
+                raise OSError(f'Output file {filename} already exists')
+
+        # Open csv writer for timestamps?
+        if save_timestamps:
+            csv_filename = os.path.splitext(filename)[0] + '.csv'
+            if not overwrite and os.path.isfile(csv_filename):
+                raise OSError(f'Timestamps file {csv_filename} already exists')
+            self.csv_fd = open(csv_filename, 'w')
+
+            fieldnames=['seconds', 'microSeconds', 'cycleSeconds',
+                        'cycleCount', 'cycleOffset']
+            self.csv_writer = DictWriter(self.csv_fd, fieldnames,
+                                         delimiter=',', lineterminator='\r\n')
+            self.csv_writer.write_header()
 
         # Filename needs to be bytes string
         if not isinstance(filename, bytes):
@@ -424,6 +452,8 @@ class Camera(object):
         if self.video_writer and self._video_writer_isOpen:
             try:
                 self.closeVideoWriter()
+                if self.csv_writer:
+                    self.csv_fd.close()
             except Exception:
                 traceback.print_exc()
 

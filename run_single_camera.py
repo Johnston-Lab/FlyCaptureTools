@@ -99,6 +99,8 @@ if __name__ == '__main__':
                              'for H264 format')
     parser.add_argument('--output-bitrate', type=int,
                         help='Bitrate. Only applicable for H264 format')
+    parser.add_argument('--no-timestamps', action='store_false',
+                        help='Specify to NOT save output video timestamps')
 
     args = parser.parse_args()
 
@@ -131,6 +133,7 @@ if __name__ == '__main__':
             writer_kwargs['img_size'] = args.output_size
         if args.output_bitrate is not None:
             writer_kwargs['bitrate'] = args.output_bitrate
+        writer_kwargs['save_timestamps'] = args.no_timestamps
 
     # Go
     main(cam_kwargs, outfile, writer_kwargs)
