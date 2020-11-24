@@ -1,0 +1,263 @@
+# -*- coding: utf-8 -*-
+"""
+Run video feed from multiple cameras. Shows live feed via OpenCV window,
+and provides option to record feed to file.
+"""
+
+import os
+import argparse
+import cv2
+import numpy as np
+import traceback
+from multiprocessing import Process, Barrier, Event, Queue
+from queue import Full as QueueFull, Empty as QueueEmpty
+from FlyCaptureUtils import Camera, img2array, getAvailableCameras
+
+
+class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
+                      argparse.RawTextHelpFormatter):
+    """
+    Combines argparse formatters
+    """
+    pass
+
+
+def run_func(barrier, start_event, stop_event, frame_queue,
+             cam_num, cam_kwargs, outfile, writer_kwargs):
+    """
+    Target function - execute as child process. Runs camera acquisition and
+    passess images back up to main process for display.
+
+    Arguments
+    ---------
+    barrier : Barrier object
+        Child process will wait at barrier once camera is initialised. This
+        can be used to signal main process when all childs have initialised.
+    start_event : Event object
+        Child process will block after barrier till start event is set. Allows
+        main process to signal to start acquisition.
+    stop_event : Event object
+        Child process will continue execution till stop event is set. Allows
+        main process to signal to stop acquisition.
+    frame_queue : Queue object
+        Queue will be used to pass images back up to main process for display.
+
+    All other arguments as per main function.
+
+    """
+
+    # Init cam
+    cam = Camera(cam_num, **cam_kwargs)
+
+    # Init video writer?
+    if outfile is not None:
+        cam.openVideoWriter(outfile, **writer_kwargs)
+
+    # Signal main process we're ready by waiting for barrier
+    barrier.wait()
+
+    # Wait for start event to signal go
+    start_event.wait()
+
+    # Go!
+    cam.startCapture()
+    while not stop_event.is_set():
+        ret, img = cam.getImage()
+        if ret:
+            # Possible bug fix - converting image to array TWICE seems to
+            # prevent image corruption?!
+            img2array(img)
+            arr = img2array(img)[::2, ::2, :]
+            # Append to queue
+            try:
+                frame_queue.put_nowait(arr)
+            except QueueFull:
+                pass
+
+    # Stop & close camera
+    cam.stopCapture()
+    cam.close()
+
+
+def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
+    """
+    Main function.
+
+    Parameters
+    ----------
+    cam_nums : list
+        List of camera numbers to use.
+    cam_kwargs : dict
+        Keyword arguments to Camera class (excluding cam_num).
+    outfile : str or None
+        Output video file.
+    writer_kwargs : dict
+        Keyward arguments to Camera class's .openVideoWriter() method.
+    """
+
+    # Set up viewport for display
+    nCams = len(cam_nums)
+    nRows = np.floor(np.sqrt(nCams)).astype(int)
+    nCols = np.ceil(nCams/nRows).astype(int)
+    viewport = np.empty([nRows, nCols], dtype=object)
+
+    # Set up events and barriers
+    barrier = Barrier(nCams)
+    start_event = Event()
+    stop_event = Event()
+
+    # Set up camera processs and queues
+    cam_processes = []
+    frame_queues = []
+    for cam_num in cam_nums:
+
+        if base_outfile is not None:
+            _outfile, ext = os.path.splitext(base_outfile)
+            outfile = _outfile + f'-cam{cam_num}' + ext
+        else:
+            outfile = None
+
+        frame_queue = Queue(max_size=1)
+        args = (barrier, start_event, stop_event, frame_queue,
+                cam_num, cam_kwargs, outfile, writer_kwargs)
+        cam_process = Process(run_func, args, name=f'cam{cam_num}')
+
+        cam_processes.append(cam_process)
+        frame_queues.append(frame_queue)
+
+    # Wait at barrier till all child processs signal ready
+    while barrier.n_waiting < barrier.parties:
+        pass
+    input('Ready - Enter to begin')
+    print('Esc to quit')
+
+    # Open display window
+    winName = 'Display'
+    cv2.namedWindow(winName)
+
+    # Send go signal
+    start_event.set()
+
+    # Begin display loop - all in try block so we can kill child processs in
+    # case of main process error
+    try:
+        KEEPGOING = True
+        while KEEPGOING:
+            for cam_num in range(nCams):
+                i,j = np.unravel_index(cam_num, (nRows, nCols))
+                cam_process = cam_processes[cam_num]
+                frame_queue = frame_queues[cam_num]
+
+                # Check process is still alive - stop if not
+                if not cam_process.is_alive():
+                    print(f'Camera process ({cam_process.name}) died, exiting')
+                    KEEPGOING = False
+                    break
+
+                # Try to retrive frame from child process
+                try:
+                    frame = frame_queue.get_nowait()
+                except QueueEmpty:
+                    continue
+
+                # Downsample to reduce display size
+                frame = frame[::2, ::2, :]
+
+                # Swap colour dim to 0th axis so np.block works correctly,
+                # allocate to array
+                viewport[i,j] = np.moveaxis(frame, 2, 0)
+
+            # Prep images for display (only if we have any): concat images and
+            # return colour dim to 2nd axis
+            if all(viewport.flatten()):
+                viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
+                cv2.imshow(winName, viewport_arr)
+
+            # Display
+            k = cv2.waitKey(10)
+            if k == 27:
+                KEEPGOING = False
+
+    except Exception:  # main process errored
+        traceback.print_exc()
+
+    # Stop
+    stop_event.set()
+    for cam_process in cam_processes:
+        try:
+            cam_process.join(timeout=3)
+        except RuntimeError:
+            print('Failed to close camera process ({cam_process.name})')
+
+    # Clear window and exit
+    cv2.destroyWindow(winName)
+    print('\nDone\n')
+
+
+if __name__ == '__main__':
+    # Parse args
+    parser = argparse.ArgumentParser(usage=__doc__,
+                                     formatter_class=CustomFormatter)
+
+    parser.add_argument('--ls', action='store_true',
+                        help='List available cameras and exit')
+    parser.add_argument('-c', '--cam-nums', type=int, nargs='+',
+                        help='Index of camera to use. Omit to use all.')
+    parser.add_argument('-m', '--video-mode', default='VM_640x480RGB',
+                        help='PyCapture2 video mode code or lookup key')
+    parser.add_argument('-r', '--frame-rate', default='FR_30',
+                        help='PyCapture2 framerate code or lookup key')
+    parser.add_argument('--grab-mode', default='BUFFER_FRAMES',
+                        help='PyCapture2 grab mode code or lookup key')
+    parser.add_argument('-o', '--output', help='Path to output video file')
+    parser.add_argument('--overwrite', action='store_true',
+                        help='Overwrite an existing output file')
+    parser.add_argument('--output-format', choices=['AVI','MJPG','H264'],
+                        help='File format for output (if omitted will try to '
+                             'determine automatically)')
+    parser.add_argument('--output-quality', type=int,
+                        help='Value between 0-100. Only applicable for '
+                              'MJPG format')
+    parser.add_argument('--output-size', type=int, nargs=2,
+                        help='WIDTH HEIGHT values (pixels). Only applicable '
+                             'for H264 format')
+    parser.add_argument('--output-bitrate', type=int,
+                        help='Bitrate. Only applicable for H264 format')
+    parser.add_argument('--no-timestamps', action='store_false',
+                        help='Specify to NOT save output video timestamps')
+
+    args = parser.parse_args()
+
+    if args.ls:
+        print('Cam\tSerial')
+        for num_ser in getAvailableCameras():
+            print('\t'.join(map(str, num_ser)))
+        parser.exit()
+
+    cam_nums = args.cam_nums
+    if cam_nums is None:
+        cam_nums = [num_ser[0] for num_ser in getAvailableCameras()]
+
+    cam_kwargs = {}
+    if args.video_mode is not None:
+        cam_kwargs['video_mode'] = args.video_mode
+    if args.frame_rate is not None:
+        cam_kwargs['framerate'] = args.frame_rate
+    if args.grab_mode is not None:
+        cam_kwargs['grab_mode'] = args.grab_mode
+
+    outfile = args.output
+    writer_kwargs = {}
+    if outfile:
+        writer_kwargs['overwrite'] = args.overwrite
+        writer_kwargs['file_format'] = args.output_format
+        if args.output_quality is not None:
+            writer_kwargs['quality'] = args.output_quality
+        if args.output_size is not None:
+            writer_kwargs['img_size'] = args.output_size
+        if args.output_bitrate is not None:
+            writer_kwargs['bitrate'] = args.output_bitrate
+        writer_kwargs['save_timestamps'] = args.no_timestamps
+
+    # Go
+    main(cam_nums, cam_kwargs, outfile, writer_kwargs)
