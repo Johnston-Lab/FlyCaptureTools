@@ -8,9 +8,9 @@ import os
 import argparse
 import cv2
 import numpy as np
-import queue
 import traceback
 from threading import Thread, Event, Barrier
+from queue import Queue, Full as QueueFull, Empty as QueueEmpty
 from FlyCaptureUtils import Camera, img2array, getAvailableCameras
 
 
@@ -71,7 +71,7 @@ def run_func(barrier, start_event, stop_event, frame_queue,
             # Append to queue
             try:
                 frame_queue.put_nowait(arr)
-            except queue.Full:
+            except QueueFull:
                 pass
 
     # Stop & close camera
@@ -117,7 +117,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
         else:
             outfile = None
 
-        frame_queue = queue.Queue(max_size=1)
+        frame_queue = Queue(max_size=1)
         args = (barrier, start_event, stop_event, frame_queue,
                 cam_num, cam_kwargs, outfile, writer_kwargs)
         cam_thread = Thread(run_func, args, name=f'cam{cam_num}')
@@ -157,7 +157,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
                 # Try to retrive frame from child thread
                 try:
                     frame = frame_queue.get_nowait()
-                except queue.Empty:
+                except QueueEmpty:
                     continue
 
                 # Downsample to reduce display size
