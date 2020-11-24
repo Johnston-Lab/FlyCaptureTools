@@ -43,12 +43,12 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
     cams = []
     for cam_num in cam_nums:
         # Init
-        cam = Camera(cam_nums, **cam_kwargs)
+        cam = Camera(cam_num, **cam_kwargs)
 
         # Init video writer?
-        _outfile, ext = os.path.splitext(base_outfile)
-        outfile = _outfile + f'-cam{cam_num}' + ext
-        if outfile is not None:
+        if base_outfile is not None:
+            _outfile, ext = os.path.splitext(base_outfile)
+            outfile = _outfile + f'-cam{cam_num}' + ext
             cam.openVideoWriter(outfile, **writer_kwargs)
 
         # Append to list
