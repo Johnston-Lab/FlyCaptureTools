@@ -296,7 +296,7 @@ class Camera(object):
             if self.video_writer is not None:
                 self.video_writer.append(img)
                 if self.csv_writer is not None:
-                    self.csv_writer.writerow(img.getTimeStamp())
+                    self.csv_writer.writerow(img.getTimeStamp().__dict__)
             success = True
 
         except Exception as e:
@@ -373,7 +373,7 @@ class Camera(object):
         # Without overwrite, error if file exists. AVI writer sometimes
         # appends a bunch of zeros to name, so check that too.
         if not overwrite:
-            _filename, ext = os.path.splitext()
+            _filename, ext = os.path.splitext(filename)
             alt_filename = _filename + '-0000' + ext
             if os.path.isfile(filename) or os.path.isfile(alt_filename):
                 raise OSError(f'Output file {filename} already exists')
@@ -388,8 +388,8 @@ class Camera(object):
             fieldnames=['seconds', 'microSeconds', 'cycleSeconds',
                         'cycleCount', 'cycleOffset']
             self.csv_writer = DictWriter(self.csv_fd, fieldnames,
-                                         delimiter=',', lineterminator='\r\n')
-            self.csv_writer.write_header()
+                                         delimiter=',', lineterminator='\n')
+            self.csv_writer.writeheader()
 
         # Filename needs to be bytes string
         if not isinstance(filename, bytes):
