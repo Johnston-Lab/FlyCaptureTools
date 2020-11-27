@@ -67,10 +67,10 @@ def run_func(barrier, start_event, stop_event, frame_queue,
             # Possible bug fix - converting image to array TWICE seems to
             # prevent image corruption?!
             img2array(img)
-            arr = img2array(img)[::2, ::2, :]
+            arr = img2array(img).copy()
             # Append to queue
             try:
-                frame_queue.put_nowait(arr)
+                frame_queue.put(arr, timeout=1)
             except QueueFull:
                 pass
 
@@ -102,7 +102,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
     viewport = np.empty([nRows, nCols], dtype=object)
 
     # Set up events and barriers
-    barrier = Barrier(nCams)
+    barrier = Barrier(nCams+1)
     start_event = Event()
     stop_event = Event()
 
@@ -117,17 +117,17 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
         else:
             outfile = None
 
-        frame_queue = Queue(max_size=1)
+        frame_queue = Queue(maxsize=1)
         args = (barrier, start_event, stop_event, frame_queue,
                 cam_num, cam_kwargs, outfile, writer_kwargs)
-        cam_thread = Thread(run_func, args, name=f'cam{cam_num}')
+        cam_thread = Thread(target=run_func, args=args, name=f'cam{cam_num}')
+        cam_thread.start()
 
         cam_threads.append(cam_thread)
         frame_queues.append(frame_queue)
 
     # Wait at barrier till all child threads signal ready
-    while barrier.n_waiting < barrier.parties:
-        pass
+    barrier.wait()
     input('Ready - Enter to begin')
     print('Esc to quit')
 
@@ -154,9 +154,9 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
                     KEEPGOING = False
                     break
 
-                # Try to retrive frame from child thread
+                # Try to retrieve frame from child thread
                 try:
-                    frame = frame_queue.get_nowait()
+                    frame = frame_queue.get(timeout=1)
                 except QueueEmpty:
                     continue
 
@@ -169,12 +169,12 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
 
             # Prep images for display (only if we have any): concat images and
             # return colour dim to 2nd axis
-            if all(viewport.flatten()):
+            if all(v is not None for v in viewport.flatten()):
                 viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
                 cv2.imshow(winName, viewport_arr)
 
             # Display
-            k = cv2.waitKey(10)
+            k = cv2.waitKey(1)
             if k == 27:
                 KEEPGOING = False
 
@@ -183,14 +183,14 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
 
     # Stop
     stop_event.set()
+
+    # Clear window and exit
+    cv2.destroyWindow(winName)
     for cam_thread in cam_threads:
         try:
             cam_thread.join(timeout=3)
         except RuntimeError:
             print('Failed to close camera thread ({cam_thread.name})')
-
-    # Clear window and exit
-    cv2.destroyWindow(winName)
     print('\nDone\n')
 
 

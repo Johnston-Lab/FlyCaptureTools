@@ -77,16 +77,17 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
                 img2array(img)
                 # Downsample to reduce display size
                 arr = img2array(img)[::2, ::2, :]
-                # Swap colour dim to 0th axis so np.block works correctly,
-                # allocate to array
-                viewport[i,j] = np.moveaxis(arr, 2, 0)
+                # Swap colour dim to 0th axis so np.block works correctly
+                arr = np.moveaxis(arr, 2, 0)
+                # Allocate to array
+                viewport[i,j] = arr.copy()
 
         # Concat images, return colour dim to 2nd axis
         viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
         cv2.imshow(winName, viewport_arr)
 
         # Display
-        k = cv2.waitKey(int(1000/cams[0].fps))
+        k = cv2.waitKey(1)
         if k == 27:
             break
 

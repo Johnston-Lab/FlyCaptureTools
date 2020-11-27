@@ -45,7 +45,7 @@ def run_func(barrier, start_event, stop_event, frame_queue,
     All other arguments as per main function.
 
     """
-
+    
     # Init cam
     cam = Camera(cam_num, **cam_kwargs)
 
@@ -67,16 +67,21 @@ def run_func(barrier, start_event, stop_event, frame_queue,
             # Possible bug fix - converting image to array TWICE seems to
             # prevent image corruption?!
             img2array(img)
-            arr = img2array(img)[::2, ::2, :]
+            arr = img2array(img).copy()
             # Append to queue
             try:
-                frame_queue.put_nowait(arr)
+                frame_queue.put(arr, timeout=1)
             except QueueFull:
                 pass
 
     # Stop & close camera
     cam.stopCapture()
     cam.close()
+    
+    # Close queue. We need to cancel queue joining otherwise child process
+    # can block while trying to exit if queue wasn't completely flushed.
+    frame_queue.close()
+    frame_queue.cancel_join_thread()
 
 
 def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
@@ -102,7 +107,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
     viewport = np.empty([nRows, nCols], dtype=object)
 
     # Set up events and barriers
-    barrier = Barrier(nCams)
+    barrier = Barrier(nCams+1)
     start_event = Event()
     stop_event = Event()
 
@@ -117,17 +122,17 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
         else:
             outfile = None
 
-        frame_queue = Queue(max_size=1)
+        frame_queue = Queue(maxsize=1)        
         args = (barrier, start_event, stop_event, frame_queue,
                 cam_num, cam_kwargs, outfile, writer_kwargs)
-        cam_process = Process(run_func, args, name=f'cam{cam_num}')
+        cam_process = Process(target=run_func, args=args, name=f'cam{cam_num}')
+        cam_process.start()
 
         cam_processes.append(cam_process)
         frame_queues.append(frame_queue)
 
     # Wait at barrier till all child processs signal ready
-    while barrier.n_waiting < barrier.parties:
-        pass
+    barrier.wait()
     input('Ready - Enter to begin')
     print('Esc to quit')
 
@@ -154,9 +159,9 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
                     KEEPGOING = False
                     break
 
-                # Try to retrive frame from child process
+                # Try to retrieve frame from child process
                 try:
-                    frame = frame_queue.get_nowait()
+                    frame = frame_queue.get(timeout=1)
                 except QueueEmpty:
                     continue
 
@@ -169,12 +174,12 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
 
             # Prep images for display (only if we have any): concat images and
             # return colour dim to 2nd axis
-            if all(viewport.flatten()):
+            if all(v is not None for v in viewport.flat):
                 viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
                 cv2.imshow(winName, viewport_arr)
 
             # Display
-            k = cv2.waitKey(10)
+            k = cv2.waitKey(1)
             if k == 27:
                 KEEPGOING = False
 
@@ -183,14 +188,13 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
 
     # Stop
     stop_event.set()
-    for cam_process in cam_processes:
-        try:
-            cam_process.join(timeout=3)
-        except RuntimeError:
-            print('Failed to close camera process ({cam_process.name})')
-
+    
     # Clear window and exit
     cv2.destroyWindow(winName)
+    for cam_process in cam_processes:
+        cam_process.join(timeout=1)
+        if (cam_process.exitcode is None) or (cam_process.exitcode < 0):
+            cam_process.terminate()
     print('\nDone\n')
 
 

@@ -57,7 +57,7 @@ def main(cam_kwargs, outfile, writer_kwargs):
             arr = img2array(img)
             cv2.imshow(winName, arr)
 
-        k = cv2.waitKey(int(1000/cam.fps))
+        k = cv2.waitKey(1)
         if k == 27:
             break
 
