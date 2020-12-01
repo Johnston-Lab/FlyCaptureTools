@@ -236,7 +236,7 @@ class Camera(object):
         # Reverse grab image resolution out of video mode
         try:
             mode_key = [k for k,v in VIDEO_MODES.items() \
-                         if v == self.video_mode]
+                        if v == self.video_mode]
             assert(len(mode_key)) == 1
             mode_key = mode_key[0]
             # E.g. split 'VM_<W>x<H>RGB' on 'x' then remove non-numeric chars
@@ -309,7 +309,8 @@ class Camera(object):
 
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
                         quality=75, bitrate=1000000, img_size=None,
-                        save_timestamps=True):
+                        embed_image_info={'timestamp':True},
+                        save_timestamps=False):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -338,9 +339,16 @@ class Camera(object):
             Image resolution. Only applicable for H264 format. If not given,
             will attempt to determine from camera's video mode, but this
             might not work. The default is None.
+        embed_image_info : dict or None, optional
+            Dictionary of boolean values indicating information to embed
+            within image pixels. Available options: timestamps, gain, shutter,
+            brightness, exposure, whiteBalance, frameCounter, strobePattern,
+            ROIPosition. The default is to embed timestamps.
         save_timestamps : bool, optional
             If True, timestamps for each frame will be saved to a csv file
-            corresponding to the output video file. The default is True.
+            corresponding to the output video file. Note that timestamps
+            within embedded image info are preferable as they are more
+            accurate. The default is False.
         """
         # Try to auto-determine file format if unspecified
         if file_format is None:
@@ -377,6 +385,14 @@ class Camera(object):
             alt_filename = _filename + '-0000' + ext
             if os.path.isfile(filename) or os.path.isfile(alt_filename):
                 raise OSError(f'Output file {filename} already exists')
+
+        # Update camera to embed image info?
+        if embed_image_info:
+            available_info = self.cam.getEmbeddedImageInfo().available.__dict__
+            for k in embed_image_info:
+                if (k not in available_info) or (not available_info[k]):
+                    raise KeyError(f'\'{k}\' not a valid embedded property')
+            self.cam.setEmbeddedImageInfo(**embed_image_info)
 
         # Open csv writer for timestamps?
         if save_timestamps:
