@@ -19,7 +19,7 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     pass
 
 
-def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
+def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
     """
     Main function.
 
@@ -31,6 +31,8 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
         Output video file.
     writer_kwargs : dict
         Keyward arguments to Camera class's .openVideoWriter() method.
+    pixel_format : PyCapture2.PIXEL_FORMAT value or str
+        Format to convert image to for display.
     """
 
     # Set up viewport for display
@@ -74,9 +76,9 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
             if ret:
                 # Possible bug fix - converting image to array TWICE seems to
                 # prevent image corruption?!
-                img2array(img)
+                img2array(img, pixel_format)
                 # Downsample to reduce display size
-                arr = img2array(img)[::2, ::2, :]
+                arr = img2array(img, pixel_format)[::2, ::2, :]
                 # Swap colour dim to 0th axis so np.block works correctly
                 arr = np.moveaxis(arr, 2, 0)
                 # Allocate to array
@@ -135,7 +137,9 @@ if __name__ == '__main__':
                         help='List of properties to embed in image pixels')
     parser.add_argument('--csv-timestamps', action='store_true',
                         help='Specify to save timestamps to csv')
-
+    parser.add_argument('--pixel-format', default='BGR',
+                        help='Image conversion format for display')
+    
     args = parser.parse_args()
 
     if args.ls:
@@ -170,5 +174,7 @@ if __name__ == '__main__':
         writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.csv_timestamps
         
+    pixel_format = args.pixel_format
+        
     # Go
-    main(cam_nums, cam_kwargs, outfile, writer_kwargs)
+    main(cam_nums, cam_kwargs, outfile, writer_kwargs, pixel_format)

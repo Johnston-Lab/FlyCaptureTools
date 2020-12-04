@@ -16,7 +16,7 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     """
     pass
 
-def main(cam_kwargs, outfile, writer_kwargs):
+def main(cam_kwargs, outfile, writer_kwargs, pixel_format):
     """
     Main function.
 
@@ -27,7 +27,9 @@ def main(cam_kwargs, outfile, writer_kwargs):
     outfile : str or None
         Output video file.
     writer_kwargs : dict
-        Keyward arguments to Camera class's .openVideoWriter() method.
+        Keyword arguments to Camera class's .openVideoWriter() method.
+    pixel_format : PyCapture2.PIXEL_FORMAT value or str
+        Format to convert image to for display.
     """
     # Init camera
     cam = Camera(**cam_kwargs)
@@ -53,8 +55,8 @@ def main(cam_kwargs, outfile, writer_kwargs):
         if ret:
             # Possible bug fix - converting image to array TWICE seems to
             # prevent image corruption?!
-            img2array(img)
-            arr = img2array(img)
+            img2array(img, pixel_format)
+            arr = img2array(img, pixel_format)
             cv2.imshow(winName, arr)
 
         k = cv2.waitKey(1)
@@ -104,6 +106,8 @@ if __name__ == '__main__':
                         help='List of properties to embed in image pixels')
     parser.add_argument('--csv-timestamps', action='store_true',
                         help='Specify to save timestamps to csv')
+    parser.add_argument('--pixel-format', default='BGR',
+                        help='Image conversion format for display')
 
     args = parser.parse_args()
 
@@ -138,6 +142,8 @@ if __name__ == '__main__':
             writer_kwargs['bitrate'] = args.output_bitrate
         writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.csv_timestamps
+        
+    pixel_format = args.pixel_format
 
     # Go
-    main(cam_kwargs, outfile, writer_kwargs)
+    main(cam_kwargs, outfile, writer_kwargs, pixel_format)
