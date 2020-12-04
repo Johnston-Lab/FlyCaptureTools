@@ -99,7 +99,8 @@ if __name__ == '__main__':
                              'for H264 format')
     parser.add_argument('--output-bitrate', type=int,
                         help='Bitrate. Only applicable for H264 format')
-    parser.add_argument('--embed-image-info', nargs='*', default=['timestamp'],
+    parser.add_argument('--embed-image-info', nargs='*',
+                        default=['timestamp','frameCounter'],
                         help='List of properties to embed in image pixels')
     parser.add_argument('--csv-timestamps', action='store_true',
                         help='Specify to save timestamps to csv')

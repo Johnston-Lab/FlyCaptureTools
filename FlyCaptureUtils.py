@@ -309,7 +309,7 @@ class Camera(object):
 
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
                         quality=75, bitrate=1000000, img_size=None,
-                        embed_image_info=['timestamp'],
+                        embed_image_info=['timestamp','frameCounter'],
                         csv_timestamps=False):
         """
         Opens a video writer. Subsequent calls to .get_image() will
@@ -324,7 +324,7 @@ class Camera(object):
             Output format to use. If None, will automatically set to 'AVI'
             if filename ends with an '.avi' extension, 'H264' if filename
             ends with a 'mp4' extension, or will raise an error for other
-            extensions. Note that 'MJPG' and 'H264' formats require addtional
+            extensions. Note that 'MJPG' and 'H264' formats permit addtional
             arguments to be passed. The default is None.
         overwrite : bool, optional
             If False and the output file already exists, an error will be
@@ -345,7 +345,7 @@ class Camera(object):
             exposure, whiteBalance, frameCounter, strobePattern, ROIPosition.
             Alternatively specify string 'all' to use all available properties.
             Specify None or False to not embed any properties. The default is
-            to embed timestamps.
+            to embed timestamps and the frameCounter.
         csv_timestamps : bool, optional
             If True, timestamps for each frame will be saved to a csv file
             corresponding to the output video file. Note that embedding
