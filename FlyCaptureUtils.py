@@ -41,22 +41,27 @@ def enum2dict(obj, key_filter=None):
         D = dict(filter(lambda elem: key_filter(elem[0]), D.items()))
     return D
 
-def img2array(img):
+def img2array(img, pixel_format='BGR'):
     """
     Converts PyCapture2 image object to BGR numpy array.
 
     Parameters
     ----------
-    img : PyCaputre2.Image object
+    img : PyCapture2.Image object
         Image retrieved from buffer.
+    pixel_format : PyCapture2.PIXEL_FORMAT value or str, optional
+        Format to convert image to. Can be one of the PyCapture2.PIXEL_FORMAT
+        codes, or a key for the PIXEL_MODES lookup dict. The default is 'BGR'.
 
     Returns
     -------
     frame : numpy.ndarray
         Image data as a BGR uint8 array.
     """
-    return img.convert(PyCapture2.PIXEL_FORMAT.BGR) \
-        .getData().reshape(img.getRows(), img.getCols(), 3)
+    if isinstance(pixel_format, str):
+        pixel_format = PIXEL_FORMATS[pixel_format]
+    return img.convert(pixel_format).getData() \
+              .reshape(img.getRows(), img.getCols(), -1).squeeze()
 
 def getAvailableCameras(bus=None, camNums=None):
     """
