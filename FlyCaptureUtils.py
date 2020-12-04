@@ -309,8 +309,8 @@ class Camera(object):
 
     def openVideoWriter(self, filename, file_format=None, overwrite=False,
                         quality=75, bitrate=1000000, img_size=None,
-                        embed_image_info={'timestamp':True},
-                        save_timestamps=False):
+                        embed_image_info=['timestamp'],
+                        csv_timestamps=False):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -339,16 +339,18 @@ class Camera(object):
             Image resolution. Only applicable for H264 format. If not given,
             will attempt to determine from camera's video mode, but this
             might not work. The default is None.
-        embed_image_info : dict or None, optional
-            Dictionary of boolean values indicating information to embed
-            within image pixels. Available options: timestamps, gain, shutter,
-            brightness, exposure, whiteBalance, frameCounter, strobePattern,
-            ROIPosition. The default is to embed timestamps.
-        save_timestamps : bool, optional
+        embed_image_info : list or 'all' or None, optional
+            List of property names indicating information to embed within image
+            pixels. Available properties: timestamp, gain, shutter, brightness,
+            exposure, whiteBalance, frameCounter, strobePattern, ROIPosition.
+            Alternatively specify string 'all' to use all available properties.
+            Specify None or False to not embed any properties. The default is
+            to embed timestamps.
+        csv_timestamps : bool, optional
             If True, timestamps for each frame will be saved to a csv file
-            corresponding to the output video file. Note that timestamps
-            within embedded image info are preferable as they are more
-            accurate. The default is False.
+            corresponding to the output video file. Note that embedding
+            timestamps image info is preferable as they are more accurate.
+            The default is False.
         """
         # Try to auto-determine file format if unspecified
         if file_format is None:
@@ -386,16 +388,27 @@ class Camera(object):
             if os.path.isfile(filename) or os.path.isfile(alt_filename):
                 raise OSError(f'Output file {filename} already exists')
 
-        # Update camera to embed image info?
+        # Update camera to embed image info
+        available_info = self.cam.getEmbeddedImageInfo().available
+        keys = [k for k in dir(available_info) if not k.startswith('__')]
+        _info = dict((k, False) for k in keys)
+        
         if embed_image_info:
-            available_info = self.cam.getEmbeddedImageInfo().available.__dict__
-            for k in embed_image_info:
-                if (k not in available_info) or (not available_info[k]):
-                    raise KeyError(f'\'{k}\' not a valid embedded property')
-            self.cam.setEmbeddedImageInfo(**embed_image_info)
+            if (embed_image_info == 'all') or ('all' in embed_image_info):
+                for k in keys:
+                    _info[k] = getattr(available_info, k)
+            else:  # use specified values
+                for k in embed_image_info:
+                    if not hasattr(available_info, k):
+                        raise KeyError(f'\'{k}\' not a valid embedded property')
+                    elif not getattr(available_info, k):
+                        raise ValueError(f'\{k}\' embedded property not available')
+                    _info[k] = True
+                
+        self.cam.setEmbeddedImageInfo(**_info)
 
         # Open csv writer for timestamps?
-        if save_timestamps:
+        if csv_timestamps:
             csv_filename = os.path.splitext(filename)[0] + '.csv'
             if not overwrite and os.path.isfile(csv_filename):
                 raise OSError(f'Timestamps file {csv_filename} already exists')

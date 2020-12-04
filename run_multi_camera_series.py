@@ -130,8 +130,10 @@ if __name__ == '__main__':
                              'for H264 format')
     parser.add_argument('--output-bitrate', type=int,
                         help='Bitrate. Only applicable for H264 format')
-    parser.add_argument('--no-timestamps', action='store_false',
-                        help='Specify to NOT save output video timestamps')
+    parser.add_argument('--embed-image-info', nargs='*', default=['timestamp'],
+                        help='List of properties to embed in image pixels')
+    parser.add_argument('--csv-timestamps', action='store_true',
+                        help='Specify to save timestamps to csv')
 
     args = parser.parse_args()
 
@@ -164,7 +166,8 @@ if __name__ == '__main__':
             writer_kwargs['img_size'] = args.output_size
         if args.output_bitrate is not None:
             writer_kwargs['bitrate'] = args.output_bitrate
-        writer_kwargs['save_timestamps'] = args.no_timestamps
-
+        writer_kwargs['embed_image_info'] = args.embed_image_info
+        writer_kwargs['csv_timestamps'] = args.csv_timestamps
+        
     # Go
     main(cam_nums, cam_kwargs, outfile, writer_kwargs)
