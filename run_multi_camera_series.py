@@ -62,7 +62,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
 
     # Open display window
     winName = 'Display'
-    cv2.namedWindow(winName)
+    cv2.namedWindow(winName, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
     # Start capture
     for cam in cams:
@@ -77,15 +77,17 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
                 # Possible bug fix - converting image to array TWICE seems to
                 # prevent image corruption?!
                 img2array(img, pixel_format)
-                # Downsample to reduce display size
-                arr = img2array(img, pixel_format)[::2, ::2, :]
+                arr = img2array(img, pixel_format).copy()
                 # Swap colour dim to 0th axis so np.block works correctly
-                arr = np.moveaxis(arr, 2, 0)
+                if arr.ndim == 3:
+                    arr = np.moveaxis(arr, 2, 0)
                 # Allocate to array
-                viewport[i,j] = arr.copy()
+                viewport[i,j] = arr
 
         # Concat images, return colour dim to 2nd axis
-        viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
+        viewport_arr = np.block(viewport.tolist())
+        if viewport_arr.ndim == 3:
+            viewport_arr = np.moveaxis(viewport_arr, 0, 2)
         cv2.imshow(winName, viewport_arr)
 
         # Display

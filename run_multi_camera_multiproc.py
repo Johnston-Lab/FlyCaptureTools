@@ -134,13 +134,16 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
         frame_queues.append(frame_queue)
 
     # Wait at barrier till all child processs signal ready
-    barrier.wait()
+    try:
+        barrier.wait(timeout=5)
+    except Exception:
+        raise RuntimeError('Child processes failed to initialise')
     input('Ready - Enter to begin')
     print('Select window then Esc to quit')
 
     # Open display window
     winName = 'Display'
-    cv2.namedWindow(winName)
+    cv2.namedWindow(winName, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
 
     # Send go signal
     start_event.set()
@@ -166,18 +169,20 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
                     frame = frame_queue.get(timeout=1)
                 except QueueEmpty:
                     continue
-
-                # Downsample to reduce display size
-                frame = frame[::2, ::2, :]
-
-                # Swap colour dim to 0th axis so np.block works correctly,
-                # allocate to array
-                viewport[i,j] = np.moveaxis(frame, 2, 0)
+                
+                # Swap colour dim to 0th axis so np.block works correctly
+                if frame.ndim == 3:
+                    frame = np.moveaxis(frame, 2, 0)
+                
+                # Allocate to array
+                viewport[i,j] = frame
 
             # Prep images for display (only if we have any): concat images and
             # return colour dim to 2nd axis
             if all(v is not None for v in viewport.flat):
-                viewport_arr = np.moveaxis(np.block(viewport.tolist()), 0, 2)
+                viewport_arr = np.block(viewport.tolist())
+                if viewport_arr.ndim == 3:
+                    viewport_arr = np.moveaxis(viewport_arr, 0, 2)
                 cv2.imshow(winName, viewport_arr)
 
             # Display
