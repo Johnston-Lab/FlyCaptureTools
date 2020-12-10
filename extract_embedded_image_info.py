@@ -136,46 +136,54 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(usage=__doc__,
                                      formatter_class=CustomFormatter)
 
-    parser.add_argument('-i', '--input', required=True,
-                        help='Path to input video file')
+    parser.add_argument('-i', '--input', required=True, nargs='+',
+                        help='Path to input video file(s)')
     parser.add_argument('-p', '--properties', required=True, nargs='+',
                         help='List of properties to extract from frames')
-    parser.add_argument('-o', '--output', required=True,
-                        help='Path to output csv file')
+    parser.add_argument('-o', '--output', nargs='+',
+                        help='Path to output csv file(s)')
     
     args = parser.parse_args()
-    infile = args.input
+    infiles = args.input
     properties = args.properties
-    outfile = args.output
-    if not os.path.splitext(outfile)[1]:
-        outfile += '.csv'
+    outfiles = args.output
     
-    # Open outfile
-    fd = open(outfile, 'w')
-    
-    # Process & write out
-    res = processClip(infile, properties)
-    for i, row in enumerate(res):
+    if outfiles is None:
+        outfiles = [os.path.splitext(infile)[0] + '-embedded_info.csv' \
+                    for infile in infiles]
+    elif len(outfiles) == 1:
+        outfiles = outfiles * len(infiles)
         
-        # Timestamps and ROIPosition need a bit of re-formatting
-        if 'timestamp' in row.keys():
-            for k, val in row['timestamp'].items():
-                row[f'timestamp.{k}'] = val
-            row.pop('timestamp')
-            
-        if 'ROIPosition' in row.keys():
-            for k, val in row['ROIPosition'].items():
-                row[f'ROIPosition.{k}'] = val
-            row.pop('ROIPosition')
-            
-        # On 1st iter, open csv writer and write headers
-        if i == 0:
-            writer = csv.DictWriter(fd, fieldnames=row.keys(), delimiter=',',
-                                    lineterminator='\n')
-            writer.writeheader()
-            
-        # Write data
-        writer.writerow(row)
+    # Loop files
+    for infile, outfile in zip(infiles, outfiles):
+        print(infile)
         
-    # Close outfile and finish
-    fd.close()    
+        # Open outfile
+        fd = open(outfile, 'w')
+        
+        # Process & write out
+        res = processClip(infile, properties)
+        for i, row in enumerate(res):
+            
+            # Timestamps and ROIPosition need a bit of re-formatting
+            if 'timestamp' in row.keys():
+                for k, val in row['timestamp'].items():
+                    row[f'timestamp.{k}'] = val
+                row.pop('timestamp')
+                
+            if 'ROIPosition' in row.keys():
+                for k, val in row['ROIPosition'].items():
+                    row[f'ROIPosition.{k}'] = val
+                row.pop('ROIPosition')
+                
+            # On 1st iter, open csv writer and write headers
+            if i == 0:
+                writer = csv.DictWriter(fd, fieldnames=row.keys(),
+                                        delimiter=',', lineterminator='\n')
+                writer.writeheader()
+                
+            # Write data
+            writer.writerow(row)
+            
+        # Close outfile and finish
+        fd.close()    
