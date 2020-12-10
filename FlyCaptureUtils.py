@@ -308,7 +308,7 @@ class Camera(object):
             if onError == 'error':
                 raise e
             elif onError == 'warn':
-                warnings.warn(e)
+                warnings.warn(str(e))
 
         return success, img
 
