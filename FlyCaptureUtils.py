@@ -41,6 +41,40 @@ def enum2dict(obj, key_filter=None):
         D = dict(filter(lambda elem: key_filter(elem[0]), D.items()))
     return D
 
+def imgSize_from_vidMode(video_mode):
+    """
+    Attempts to extract image resolution given PyCapture2 VIDEO_MODE code
+
+    Parameters
+    ----------
+    video_mode : str or int
+        PyCapture2.VIDEO_MODE code or a key for the VIDEO_MODES lookup dict.
+
+    Returns
+    -------
+    size : tuple
+        (width, height) values
+    """
+    # If code, lookup name from dict
+    if isinstance(video_mode, int):
+        video_mode = [k for k,v in VIDEO_MODES.items() if v == video_mode]
+        if len(video_mode) > 1:
+            raise RuntimeError('Multiple matching video mode codes')
+        video_mode = video_mode[0]
+        
+    # Split at 'x' character to get width and height portions of string
+    s1, s2 = video_mode.split('x')
+    
+    # Width is easy - just strip 'VM_' from front of 1st string
+    width = int(re.sub('^VM_', '', s1))
+    
+    # Height bit harder - find numeric chars in 2nd string but only at start
+    # (e.g. in '480YUV422', count the '480' but not the '422')
+    height = int(re.search('^[0-9]*', s2).group())
+    
+    # Return
+    return (width, height)
+
 def img2array(img, pixel_format='BGR'):
     """
     Converts PyCapture2 image object to BGR numpy array.
@@ -239,18 +273,7 @@ class Camera(object):
         self.cam.setConfiguration(grabMode=self.grab_mode)
 
         # Reverse grab image resolution out of video mode
-        try:
-            mode_key = [k for k,v in VIDEO_MODES.items() \
-                        if v == self.video_mode]
-            assert(len(mode_key)) == 1
-            mode_key = mode_key[0]
-            # E.g. split 'VM_<W>x<H>RGB' on 'x' then remove non-numeric chars
-            sz = [int(re.sub('[^0-9]', '', s)) for s in mode_key.split('x')]
-            assert(len(sz) == 2)
-            self.img_size = sz
-        except Exception:
-            warnings.warn('Unable to determine image resolution values')
-            self.img_size = None
+        self.img_size = imgSize_from_vidMode(self.video_mode)
 
         # Also note fps value
         self.fps = self.cam.getProperty(PyCapture2.PROPERTY_TYPE.FRAME_RATE).absValue
