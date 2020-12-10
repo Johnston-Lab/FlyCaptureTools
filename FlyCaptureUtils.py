@@ -75,6 +75,40 @@ def imgSize_from_vidMode(video_mode):
     # Return
     return (width, height)
 
+def imgDepth_from_pixFormat(pixel_format):
+    """
+    Work out number of colour channels given pixel format. Raises error
+    if value can't be determined.
+
+    Parameters
+    ----------
+    pixel_format : str or int
+        PyCapture2.PIXEL_FORMAT code or key for PIXEL_FORMATS lookup dict.
+
+    Returns
+    -------
+    img_depth : int
+        Number of colour channels.
+    """
+    # If code, lookup name from dict
+    if isinstance(pixel_format, int):
+        pixel_format = [k for k,v in PIXEL_FORMATS.items() if v == pixel_format]
+        if len(pixel_format) > 1:
+            raise RuntimeError('Multiple matching pixel format codes')
+        pixel_format = pixel_format[0]
+    
+    # Return image depth, or error if one can't be found
+    if ('RGBU' in pixel_format) or ('BGRU' in pixel_format):
+        return 4
+    elif ('RGB' in pixel_format) or ('BGR' in pixel_format):
+        return 3
+    elif 'YUV' in pixel_format:
+        return 2  # won't work for opencv display, but do it anyway
+    elif 'MONO' in pixel_format:
+        return 1
+    else:
+        raise ValueError('Cannot determine image depth from pixel format') 
+
 def img2array(img, pixel_format='BGR'):
     """
     Converts PyCapture2 image object to BGR numpy array.
