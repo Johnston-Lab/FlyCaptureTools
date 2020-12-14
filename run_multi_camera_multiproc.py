@@ -11,7 +11,8 @@ import numpy as np
 import traceback
 from multiprocessing import Process, Barrier, Event, Queue
 from queue import Full as QueueFull, Empty as QueueEmpty
-from FlyCaptureUtils import Camera, img2array, getAvailableCameras
+from FlyCaptureUtils import (Camera, img2array, imgSize_from_vidMode,
+                             imgDepth_from_pixFormat, getAvailableCameras)
 
 
 class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
@@ -21,8 +22,7 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     """
     pass
 
-
-def run_func(barrier, start_event, stop_event, frame_queue,
+def run_func(barrier, start_event, stop_event, frame_queue, error_queue,
              cam_num, cam_kwargs, outfile, writer_kwargs, pixel_format):
     """
     Target function - execute as child process. Runs camera acquisition and
@@ -41,11 +41,13 @@ def run_func(barrier, start_event, stop_event, frame_queue,
         main process to signal to stop acquisition.
     frame_queue : Queue object
         Queue will be used to pass images back up to main process for display.
+    error_queue : Queue object
+        Queue will be used to pass error instances back up to main process.
 
     All other arguments as per main function.
 
     """
-    
+
     # Init cam
     cam = Camera(cam_num, **cam_kwargs)
 
@@ -54,34 +56,38 @@ def run_func(barrier, start_event, stop_event, frame_queue,
         cam.openVideoWriter(outfile, **writer_kwargs)
 
     # Signal main process we're ready by waiting for barrier
-    barrier.wait()
+    barrier.wait(timeout=5)
 
     # Wait for start event to signal go
     start_event.wait()
 
     # Go!
-    cam.startCapture()
-    while not stop_event.is_set():
-        ret, img = cam.getImage()
-        if ret:
-            # Possible bug fix - converting image to array TWICE seems to
-            # prevent image corruption?!
-            img2array(img, pixel_format)
-            arr = img2array(img, pixel_format).copy()
-            # Append to queue
-            try:
-                frame_queue.put(arr, timeout=1)
-            except QueueFull:
-                pass
+    try:
+        cam.startCapture()
+        while not stop_event.is_set():
+            ret, img = cam.getImage()
+            if ret:
+                # Possible bug fix - converting image to array TWICE seems to
+                # prevent image corruption?!
+                img2array(img, pixel_format)
+                arr = img2array(img, pixel_format).copy()
+                # Append to queue
+                try:
+                    frame_queue.put_nowait(arr)
+                except QueueFull:
+                    pass
 
-    # Stop & close camera
-    cam.stopCapture()
-    cam.close()
-    
-    # Close queue. We need to cancel queue joining otherwise child process
-    # can block while trying to exit if queue wasn't completely flushed.
-    frame_queue.close()
-    frame_queue.cancel_join_thread()
+        # Stop & close camera
+        cam.stopCapture()
+        cam.close()
+
+        # Close queue. We need to cancel queue joining otherwise child process
+        # can block while trying to exit if queue wasn't completely flushed.
+        frame_queue.close()
+        frame_queue.cancel_join_thread()
+
+    except Exception as e:
+        error_queue.put(e)
 
 
 def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
@@ -101,14 +107,16 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
     pixel_format : PyCapture2.PIXEL_FORMAT value or str
         Format to convert image to for display.
     """
-
     # Set up viewport for display
     nCams = len(cam_nums)
     nRows = np.floor(np.sqrt(nCams)).astype(int)
     nCols = np.ceil(nCams/nRows).astype(int)
-    viewport = np.empty([nRows, nCols], dtype=object)
+    imgW, imgH = imgSize_from_vidMode(cam_kwargs['video_mode'])  # TODO - handle None
+    imgD = imgDepth_from_pixFormat(pixel_format)
+    viewport = np.zeros([imgH*nRows, imgW*nCols, imgD], dtype='uint8').squeeze()
 
     # Set up events and barriers
+    nCams = len(cam_nums)
     barrier = Barrier(nCams+1)
     start_event = Event()
     stop_event = Event()
@@ -116,6 +124,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
     # Set up camera processs and queues
     cam_processes = []
     frame_queues = []
+    error_queues = []
     for cam_num in cam_nums:
 
         if base_outfile is not None:
@@ -124,14 +133,16 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
         else:
             outfile = None
 
-        frame_queue = Queue(maxsize=1)        
-        args = (barrier, start_event, stop_event, frame_queue,
+        frame_queue = Queue(maxsize=1)
+        error_queue = Queue()
+        args = (barrier, start_event, stop_event, frame_queue, error_queue,
                 cam_num, cam_kwargs, outfile, writer_kwargs, pixel_format)
         cam_process = Process(target=run_func, args=args, name=f'cam{cam_num}')
         cam_process.start()
 
         cam_processes.append(cam_process)
         frame_queues.append(frame_queue)
+        error_queues.append(error_queue)
 
     # Wait at barrier till all child processs signal ready
     try:
@@ -157,33 +168,29 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
                 i,j = np.unravel_index(cam_num, (nRows, nCols))
                 cam_process = cam_processes[cam_num]
                 frame_queue = frame_queues[cam_num]
+                error_queue = error_queues[cam_num]
 
                 # Check process is still alive - stop if not
-                if not cam_process.is_alive():
+                try:
+                    e = error_queue.get_nowait()
                     print(f'Camera process ({cam_process.name}) died, exiting')
+                    print(e)
                     KEEPGOING = False
                     break
+                except QueueEmpty:
+                    pass
 
                 # Try to retrieve frame from child process
                 try:
-                    frame = frame_queue.get(timeout=1)
+                    frame = frame_queue.get_nowait()
                 except QueueEmpty:
                     continue
-                
-                # Swap colour dim to 0th axis so np.block works correctly
-                if frame.ndim == 3:
-                    frame = np.moveaxis(frame, 2, 0)
-                
-                # Allocate to array
-                viewport[i,j] = frame
 
-            # Prep images for display (only if we have any): concat images and
-            # return colour dim to 2nd axis
-            if all(v is not None for v in viewport.flat):
-                viewport_arr = np.block(viewport.tolist())
-                if viewport_arr.ndim == 3:
-                    viewport_arr = np.moveaxis(viewport_arr, 0, 2)
-                cv2.imshow(winName, viewport_arr)
+                # Allocate to array
+                viewport[i*imgH:(i+1)*imgH, j*imgW:(j+1)*imgW, ...] = frame
+
+            # Display
+            cv2.imshow(winName, viewport)
 
             # Display
             k = cv2.waitKey(1)
@@ -195,7 +202,7 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
 
     # Stop
     stop_event.set()
-    
+
     # Clear window and exit
     cv2.destroyWindow(winName)
     for cam_process in cam_processes:
@@ -241,7 +248,7 @@ if __name__ == '__main__':
                         help='Specify to save timestamps to csv')
     parser.add_argument('--pixel-format', default='BGR',
                         help='Image conversion format for display')
-    
+
     args = parser.parse_args()
 
     if args.ls:
@@ -275,8 +282,8 @@ if __name__ == '__main__':
             writer_kwargs['bitrate'] = args.output_bitrate
         writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.csv_timestamps
-        
+
     pixel_format = args.pixel_format
-        
+
     # Go
     main(cam_nums, cam_kwargs, outfile, writer_kwargs, pixel_format)

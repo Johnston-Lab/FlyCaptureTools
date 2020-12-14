@@ -11,7 +11,8 @@ import numpy as np
 import traceback
 from threading import Thread, Event, Barrier
 from queue import Queue, Full as QueueFull, Empty as QueueEmpty
-from FlyCaptureUtils import Camera, img2array, getAvailableCameras
+from FlyCaptureUtils import (Camera, img2array, imgSize_from_vidMode,
+                             imgDepth_from_pixFormat, getAvailableCameras)
 
 
 class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
@@ -70,7 +71,7 @@ def run_func(barrier, start_event, stop_event, frame_queue,
             arr = img2array(img, pixel_format).copy()
             # Append to queue
             try:
-                frame_queue.put(arr, timeout=1)
+                frame_queue.put_nowait(arr)
             except QueueFull:
                 pass
 
@@ -96,12 +97,13 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
     pixel_format : PyCapture2.PIXEL_FORMAT value or str
         Format to convert image to for display.
     """
-
     # Set up viewport for display
     nCams = len(cam_nums)
     nRows = np.floor(np.sqrt(nCams)).astype(int)
     nCols = np.ceil(nCams/nRows).astype(int)
-    viewport = np.empty([nRows, nCols], dtype=object)
+    imgW, imgH = imgSize_from_vidMode(cam_kwargs['video_mode'])  # TODO - handle None
+    imgD = imgDepth_from_pixFormat(pixel_format)
+    viewport = np.zeros([imgH*nRows, imgW*nCols, imgD], dtype='uint8').squeeze()
 
     # Set up events and barriers
     barrier = Barrier(nCams+1)
@@ -161,24 +163,15 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
 
                 # Try to retrieve frame from child thread
                 try:
-                    frame = frame_queue.get(timeout=1)
+                    frame = frame_queue.get_nowait()
                 except QueueEmpty:
                     continue
 
-                # Swap colour dim to 0th axis so np.block works correctly
-                if frame.ndim == 3:
-                    frame = np.moveaxis(frame, 2, 0)
-                
                 # Allocate to array
-                viewport[i,j] = frame
+                viewport[i*imgH:(i+1)*imgH, j*imgW:(j+1)*imgW, ...] = frame
 
-            # Prep images for display (only if we have any): concat images and
-            # return colour dim to 2nd axis
-            if all(v is not None for v in viewport.flatten()):
-                viewport_arr = np.block(viewport.tolist())
-                if viewport_arr.ndim == 3:
-                    viewport_arr = np.moveaxis(viewport_arr, 0, 2)
-                cv2.imshow(winName, viewport_arr)
+            # Display
+            cv2.imshow(winName, viewport)
 
             # Display
             k = cv2.waitKey(1)
@@ -237,7 +230,7 @@ if __name__ == '__main__':
                         help='Specify to save timestamps to csv')
     parser.add_argument('--pixel-format', default='BGR',
                         help='Image conversion format for display')
-    
+
     args = parser.parse_args()
 
     if args.ls:
@@ -271,8 +264,8 @@ if __name__ == '__main__':
             writer_kwargs['bitrate'] = args.output_bitrate
         writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.csv_timestamps
-        
+
     pixel_format = args.pixel_format
-        
+
     # Go
     main(cam_nums, cam_kwargs, outfile, writer_kwargs, pixel_format)

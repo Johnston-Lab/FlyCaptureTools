@@ -8,7 +8,8 @@ import os
 import argparse
 import cv2
 import numpy as np
-from FlyCaptureUtils import Camera, img2array, getAvailableCameras
+from FlyCaptureUtils import (Camera, img2array, imgDepth_from_pixFormat,
+                             getAvailableCameras)
 
 
 class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
@@ -35,12 +36,6 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
         Format to convert image to for display.
     """
 
-    # Set up viewport for display
-    nCams = len(cam_nums)
-    nRows = np.floor(np.sqrt(nCams)).astype(int)
-    nCols = np.ceil(nCams/nRows).astype(int)
-    viewport = np.empty([nRows, nCols], dtype=object)
-
     # Set up cameras
     cams = []
     for cam_num in cam_nums:
@@ -55,6 +50,14 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
 
         # Append to list
         cams.append(cam)
+
+    # Set up viewport for display
+    nCams = len(cam_nums)
+    nRows = np.floor(np.sqrt(nCams)).astype(int)
+    nCols = np.ceil(nCams/nRows).astype(int)
+    imgW, imgH = cams[0].img_size
+    imgD = imgDepth_from_pixFormat(pixel_format)
+    viewport = np.zeros([imgH*nRows, imgW*nCols, imgD], dtype='uint8').squeeze()
 
     # Report ready
     input('Ready - Enter to begin')
@@ -78,17 +81,11 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
                 # prevent image corruption?!
                 img2array(img, pixel_format)
                 arr = img2array(img, pixel_format).copy()
-                # Swap colour dim to 0th axis so np.block works correctly
-                if arr.ndim == 3:
-                    arr = np.moveaxis(arr, 2, 0)
                 # Allocate to array
-                viewport[i,j] = arr
+                viewport[i*imgH:(i+1)*imgH, j*imgW:(j+1)*imgW, ...] = arr
 
         # Concat images, return colour dim to 2nd axis
-        viewport_arr = np.block(viewport.tolist())
-        if viewport_arr.ndim == 3:
-            viewport_arr = np.moveaxis(viewport_arr, 0, 2)
-        cv2.imshow(winName, viewport_arr)
+        cv2.imshow(winName, viewport)
 
         # Display
         k = cv2.waitKey(1)
@@ -141,7 +138,7 @@ if __name__ == '__main__':
                         help='Specify to save timestamps to csv')
     parser.add_argument('--pixel-format', default='BGR',
                         help='Image conversion format for display')
-    
+
     args = parser.parse_args()
 
     if args.ls:
@@ -175,8 +172,8 @@ if __name__ == '__main__':
             writer_kwargs['bitrate'] = args.output_bitrate
         writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.csv_timestamps
-        
+
     pixel_format = args.pixel_format
-        
+
     # Go
     main(cam_nums, cam_kwargs, outfile, writer_kwargs, pixel_format)
