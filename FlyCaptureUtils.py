@@ -61,17 +61,17 @@ def imgSize_from_vidMode(video_mode):
         if len(video_mode) > 1:
             raise RuntimeError('Multiple matching video mode codes')
         video_mode = video_mode[0]
-        
+
     # Split at 'x' character to get width and height portions of string
     s1, s2 = video_mode.split('x')
-    
+
     # Width is easy - just strip 'VM_' from front of 1st string
     width = int(re.sub('^VM_', '', s1))
-    
+
     # Height bit harder - find numeric chars in 2nd string but only at start
     # (e.g. in '480YUV422', count the '480' but not the '422')
     height = int(re.search('^[0-9]*', s2).group())
-    
+
     # Return
     return (width, height)
 
@@ -96,7 +96,7 @@ def imgDepth_from_pixFormat(pixel_format):
         if len(pixel_format) > 1:
             raise RuntimeError('Multiple matching pixel format codes')
         pixel_format = pixel_format[0]
-    
+
     # Return image depth, or error if one can't be found
     if ('RGBU' in pixel_format) or ('BGRU' in pixel_format):
         return 4
@@ -107,7 +107,7 @@ def imgDepth_from_pixFormat(pixel_format):
     elif 'MONO' in pixel_format:
         return 1
     else:
-        raise ValueError('Cannot determine image depth from pixel format') 
+        raise ValueError('Cannot determine image depth from pixel format')
 
 def img2array(img, pixel_format='BGR'):
     """
@@ -314,7 +314,6 @@ class Camera(object):
 
         # Place holders for video writer
         self.video_writer = None
-        self.file_format = None
         self.csv_fd = None
         self.csv_writer = None
 
@@ -369,10 +368,9 @@ class Camera(object):
 
         return success, img
 
-    def openVideoWriter(self, filename, file_format=None, overwrite=False,
+    def openVideoWriter(self, filename, encoder=None, overwrite=False,
                         quality=75, bitrate=1000000, img_size=None,
-                        embed_image_info=['timestamp','frameCounter'],
-                        csv_timestamps=False):
+                        csv_timestamps=True, embed_image_info=None):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -382,8 +380,8 @@ class Camera(object):
         filename : str
             Path to desired output file. If extension is omitted it will be
             inferred from <file_format> (if specified).
-        file_format : str { 'AVI' | 'MJPG' | 'H264' } or None, optional
-            Output format to use. If None, will automatically set to 'AVI'
+        encoder : str { 'AVI' | 'MJPG' | 'H264' } or None, optional
+            Output encoder to use. If None, will automatically set to 'AVI'
             if filename ends with an '.avi' extension, 'H264' if filename
             ends with a 'mp4' extension, or will raise an error for other
             extensions. Note that 'MJPG' and 'H264' formats permit addtional
@@ -401,45 +399,44 @@ class Camera(object):
             Image resolution. Only applicable for H264 format. If not given,
             will attempt to determine from camera's video mode, but this
             might not work. The default is None.
-        embed_image_info : list or 'all' or None, optional
-            List of property names indicating information to embed within image
-            pixels. Available properties: timestamp, gain, shutter, brightness,
-            exposure, whiteBalance, frameCounter, strobePattern, ROIPosition.
-            Alternatively specify string 'all' to use all available properties.
-            Specify None or False to not embed any properties. The default is
-            to embed timestamps and the frameCounter.
         csv_timestamps : bool, optional
             If True, timestamps for each frame will be saved to a csv file
-            corresponding to the output video file. Note that embedding
-            timestamps image info is preferable as they are more accurate.
-            The default is False.
+            corresponding to the output video file. The default is True.
+        embed_image_info : list or 'all' or None, optional
+            List of properties to embed within top-left image pixels. Note that
+            video MUST be monochrome for pixel values to be usable. Available
+            properties are: [timestamp, gain, shutter, brightness, exposure,
+            whiteBalance, frameCounter, strobePattern, ROIPosition].
+            Alternatively specify 'all' to use all available properties.
+            Specify None to not embed any properties. The default is None.
         """
+
         # Try to auto-determine file format if unspecified
-        if file_format is None:
+        if encoder is None:
             ext = os.path.splitext(filename)[1].lower()  # case insensitive
             if ext == '.avi':
-                file_format = 'AVI'
+                encoder = 'AVI'
             elif ext == '.mp4':
-                file_format = 'H264'
+                encoder = 'H264'
             elif not ext:
                 raise ValueError('Cannot determine file_format automatically '
                                  'without file extension')
             else:
                 raise ValueError('Cannot determine file_format automatically '
                                  f'from {ext} extension')
-            print(f'Recording using {file_format} format')
+            print(f'Recording using {encoder} encoder')
 
-        file_format = file_format.upper()  # ensure case insensitive
+        encoder = encoder.upper()  # ensure case insensitive
 
-        if not file_format in ['AVI', 'MJPG', 'H264']:
-            raise ValueError("file_format must be  'AVI', 'MJPG', or 'H264, "
-                             f"but received {file_format}")
+        if not encoder in ['AVI', 'MJPG', 'H264']:
+            raise ValueError("Encoder must be one of 'AVI', 'MJPG', or 'H264, "
+                             f"but received {encoder}")
 
         # Auto-determine file extension if necessary
         if not os.path.splitext(filename)[1]:
-            if file_format in ['AVI','MJPG']:
+            if encoder in ['AVI','MJPG']:
                 filename += '.avi'
-            elif file_format == 'H264':
+            elif encoder == 'H264':
                 filename += '.mp4'
 
         # Without overwrite, error if file exists. AVI writer sometimes
@@ -452,22 +449,23 @@ class Camera(object):
 
         # Update camera to embed image info
         available_info = self.cam.getEmbeddedImageInfo().available
-        keys = [k for k in dir(available_info) if not k.startswith('__')]
-        _info = dict((k, False) for k in keys)
-        
+        prop_keys = [k for k in dir(available_info) if not k.startswith('__')]
+        props = dict((k, False) for k in prop_keys)
+
         if embed_image_info:
             if (embed_image_info == 'all') or ('all' in embed_image_info):
-                for k in keys:
-                    _info[k] = getattr(available_info, k)
+                for k in prop_keys:
+                    props[k] = getattr(available_info, k)
             else:  # use specified values
                 for k in embed_image_info:
-                    if not hasattr(available_info, k):
-                        raise KeyError(f'\'{k}\' not a valid embedded property')
+                    if k not in prop_keys:
+                        raise KeyError("Embedded property must be one of "
+                                       f"list({prop_keys}), but received '{k}'")
                     elif not getattr(available_info, k):
-                        raise ValueError(f'\{k}\' embedded property not available')
-                    _info[k] = True
-                
-        self.cam.setEmbeddedImageInfo(**_info)
+                        raise ValueError(f"'{k}' embedded property not available")
+                    props[k] = True
+
+        self.cam.setEmbeddedImageInfo(**props)
 
         # Open csv writer for timestamps?
         if csv_timestamps:
@@ -482,27 +480,23 @@ class Camera(object):
                                          delimiter=',', lineterminator='\n')
             self.csv_writer.writeheader()
 
-        # Filename needs to be bytes string
-        if not isinstance(filename, bytes):
-            filename = filename.encode('utf-8')
-
         # Initialise video writer, allocate to class
         self.video_writer = PyCapture2.FlyCapture2Video()
-        self.file_format = file_format
 
         # Open video file
-        if self.file_format == 'AVI':
-            self.video_writer.AVIOpen(filename, self.fps)
-        elif self.file_format == 'MJPG':
-            self.video_writer.MJPGOpen(filename, self.fps, quality)
-        elif self.file_format == 'H264':
+        bytes_filename = filename.encode('utf-8')  # needs to be bytes string
+        if encoder == 'AVI':
+            self.video_writer.AVIOpen(bytes_filename, self.fps)
+        elif encoder == 'MJPG':
+            self.video_writer.MJPGOpen(bytes_filename, self.fps, quality)
+        elif encoder == 'H264':
             if img_size is None:
                 if self.img_size is None:
                     raise RuntimeError('Cannot determine image resolution')
                 else:
                     img_size = self.img_size
             W, H = img_size
-            self.video_writer.H264Open(filename, self.fps, W, H, bitrate)
+            self.video_writer.H264Open(bytes_filename, self.fps, W, H, bitrate)
 
         # Success!
         self._video_writer_isOpen = True
