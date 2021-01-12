@@ -96,7 +96,7 @@ def extractInfo(frame, properties):
 
         # ROI position also needs special handling
         elif prop == 'ROIPosition':
-            res['ROIPosition'] = {'left':int(b[:2], 2), 'top':int(b[2:], 2)}
+            res['ROIPosition'] = {'left':int(b[:16], 2), 'top':int(b[16:], 2)}
 
         # All other fields, just convert straight away
         else:
