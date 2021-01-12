@@ -506,6 +506,8 @@ class Camera(object):
         Close video writer object.
         """
         self.video_writer.close()
+        if self.csv_writer:
+            self.csv_fd.close()
         self._video_writer_isOpen = False
 
     def startCapture(self):
@@ -537,8 +539,6 @@ class Camera(object):
         if self.video_writer and self._video_writer_isOpen:
             try:
                 self.closeVideoWriter()
-                if self.csv_writer:
-                    self.csv_fd.close()
             except Exception:
                 traceback.print_exc()
 
