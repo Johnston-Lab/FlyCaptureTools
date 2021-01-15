@@ -2,6 +2,11 @@
 """
 Functions may be used to extract embedded image information from video pixels.
 Can import functions, or run script from commandline.
+
+TODO - BUG: only the information for timestamps seems to be correct. I think
+we're extracting details in the wrong order, but the documentation is too poor
+to work out what the right order is. I guess we'd probably only ever want the
+timestamps anyway, so I'm ignoring this for now.
 """
 
 import os
@@ -131,13 +136,38 @@ def processClip(filepath, properties):
 
 
 if __name__ == '__main__':
+    __doc__ = """
+Extracts embedded image information from video pixels.
+
+Commandline flags
+-----------------
+-i, --input
+    Path(s) to input video file(s)
+
+-p, --properties
+    List of properties to extract from frames: must match the properties
+    embedded in the image. See PyCaputre2 documentation or
+    FlyCaptureUtils.Camera.openVideoWriter docstring for available properties.
+
+-o, --output (optional)
+    Path(s) to output CSV file(s). A .csv extension will be appended if one isn't
+    provided. If no output files are provided, ones will be automatcially
+    generated based on the name and location of the input files.
+
+Example usage
+-------------
+> python extract_embedded_image_info.py -i clip0.avi -p timestamp \\
+    -o clip0-embedded_info.csv
+
+"""
+
 
     # Parse args
     parser = argparse.ArgumentParser(usage=__doc__,
                                      formatter_class=CustomFormatter)
 
     parser.add_argument('-i', '--input', required=True, nargs='+',
-                        help='Path to input video file(s)')
+                        help='Path(s) to input video file(s)')
     parser.add_argument('-p', '--properties', required=True, nargs='+',
                         help='List of properties to extract from frames')
     parser.add_argument('-o', '--output', nargs='+',
@@ -151,14 +181,22 @@ if __name__ == '__main__':
     if outfiles is None:
         outfiles = [os.path.splitext(infile)[0] + '-embedded_info.csv' \
                     for infile in infiles]
-    elif len(outfiles) == 1:
-        outfiles = outfiles * len(infiles)
+    elif len(infiles) != len(outfiles):
+        raise OSError('Number of input and output files must match')
 
     # Loop files
     for infile, outfile in zip(infiles, outfiles):
         print(infile)
 
-        # Open outfile
+        # Check outfile
+        ext = os.path.splitext(outfile)[1]
+        if not ext:
+            outfile += '.csv'
+        elif ext != '.csv':
+            warnings.warn('Changing output extension to .csv')
+            outfile = outfile.replace(ext, '.csv')
+
+        # Open outfile for writing
         fd = open(outfile, 'w')
 
         # Process & write out
