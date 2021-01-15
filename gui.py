@@ -551,14 +551,10 @@ class RunnerWindowBase(QMainWindow):
         self.stopBtn.clicked.connect(self.on_stop)
         self.stopBtn.setEnabled(False)
 
-        self.disconnectBtn = QPushButton('Disconnect')
-        self.disconnectBtn.clicked.connect(self.on_disconnect)
-
         btn_hbox = QHBoxLayout()
         btn_hbox.addStretch()
         btn_hbox.addWidget(self.startBtn)
         btn_hbox.addWidget(self.stopBtn)
-        btn_hbox.addWidget(self.disconnectBtn)
         btn_hbox.addStretch()
 
         vbox.addLayout(btn_hbox, Qt.AlignBottom)
@@ -592,21 +588,22 @@ class RunnerWindowBase(QMainWindow):
         self.imgQLabel.setPixmap(qpixmap)
 
     def on_start(self):
+        "Start camera capture"
         print('Start')
         self.startBtn.setEnabled(False)
         self.stopBtn.setEnabled(True)
         self.set_image(TEST_IMAGE)
 
     def on_stop(self):
+        "Stop camera capture and close runner window"
         print('Stop')
         self.startBtn.setEnabled(True)
         self.stopBtn.setEnabled(False)
         self.imgQLabel.clear()
 
-    def on_disconnect(self):
-        print('Disconnect')
         self.parent.show()
         self.close()
+
 
 
 
