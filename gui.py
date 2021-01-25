@@ -37,7 +37,7 @@ DEFAULTS = {'cam_mode':'Multi',
             'mjpg_quality':75,
             'h264_bitrate':1e6,
             'h264_size':'Auto',
-            'embedded_info':{'timestamp':Qt.Unchecked,
+            'embedded_info':{'timestamp':Qt.Checked,
                              'gain':Qt.Unchecked,
                              'shutter':Qt.Unchecked,
                              'brightness':Qt.Unchecked,
@@ -108,13 +108,11 @@ class SettingsWindow(QMainWindow):
         connectBtn = QPushButton('Connect')
         connectBtn.clicked.connect(self.on_connect)
         connectBtn.setToolTip('Connect to camera(s) and open runner window')
-        connectBtn.setToolTip('Connect to camera(s) and open runner window.')
         hbox.addWidget(connectBtn)
 
         exitBtn = QPushButton('Exit')
         exitBtn.clicked.connect(self.on_exit)
         exitBtn.setToolTip('Exit application')
-        exitBtn.setToolTip('Exit application.')
         hbox.addWidget(exitBtn)
 
         grid.addLayout(hbox, 2, 0, 1, 2)
@@ -137,7 +135,6 @@ class SettingsWindow(QMainWindow):
         self.camMode.setCurrentText(DEFAULTS['cam_mode'])
         self.camMode.currentTextChanged.connect(self.on_camera_mode_change)
         self.camMode.setToolTip('Acquire images from one or multiple cameras')
-        self.camMode.setToolTip('Acquire images from one or multiple cameras.')
         hbox.addWidget(self.camMode)
         hbox.addStretch(1)
         group_vbox.addLayout(hbox)
@@ -168,7 +165,6 @@ class SettingsWindow(QMainWindow):
         self.cameraTable.cellClicked.connect(self.on_camera_check)
 
         self.cameraTable.setToolTip('Select camera(s) to use')
-        self.cameraTable.setToolTip('Select cameras to use.')
 
         group_vbox.addWidget(self.cameraTable)
 
@@ -185,14 +181,12 @@ class SettingsWindow(QMainWindow):
         self.vidMode.addItems(VIDEO_MODES.keys())
         self.vidMode.setCurrentText(DEFAULTS['video_mode'])
         self.vidMode.setToolTip('Camera resolution and colour mode')
-        self.vidMode.setToolTip('Camera resolution and colour mode.')
         form.addRow('Video mode', self.vidMode)
 
         self.framerate = QComboBox()
         self.framerate.addItems(FRAMERATES.keys())
         self.framerate.setCurrentText(DEFAULTS['framerate'])
         self.framerate.setToolTip('Camera frame rate')
-        self.framerate.setToolTip('Camera frame rate.')
         form.addRow('Framerate', self.framerate)
 
         self.grabMode = QComboBox()
@@ -203,10 +197,6 @@ class SettingsWindow(QMainWindow):
             'not lost, but computer must keep up to avoid buffer overflows.'
             '\n\n'
             'If DROP_FRAMES, read newest frame out of buffer. Older frames '
-            'If BUFFER_FRAMES, read oldest frame out of buffer. Frames are ' \
-            'not lost, but computer must keep up to avoid buffer overflows.' \
-            '\n\n' \
-            'If DROP_FRAMES, read newest frame out of buffer. Older frames ' \
             'will be lost if computer falls behind.'
             ))
         form.addRow('Grab mode', self.grabMode)
@@ -215,8 +205,7 @@ class SettingsWindow(QMainWindow):
         self.pixelFormat.addItems(PIXEL_FORMATS.keys())
         self.pixelFormat.setCurrentText(DEFAULTS['pixel_format'])
         self.pixelFormat.setToolTip(
-            'Colour mode for display - must be appropriate for video mode'
-            'Colour mode for display. Must be appropriate for video mode.'
+            'Colour mode for display: must be appropriate for video mode'
             )
         form.addRow('Pixel format', self.pixelFormat)
 
@@ -224,7 +213,6 @@ class SettingsWindow(QMainWindow):
         self.saveOutput.stateChanged.connect(self.on_save_output_check)
         self.saveOutput.setCheckState(DEFAULTS['save_output'])
         self.saveOutput.setToolTip('Enable/disable Output Options dialog')
-        self.saveOutput.setToolTip('Enable/disable Output Options dialog.')
         form.addRow('Save video', self.saveOutput)
 
         # Update group
@@ -247,9 +235,6 @@ class SettingsWindow(QMainWindow):
             'Base filepath to desired output file. If camera mode is Multi '
             'then camera numbers will be appended to filename. File '
             'extension can be added automatically if an output encoder is '
-            'Base filepath to desired output file. If camera mode is Multi ' \
-            'then camera numbers will be appended to filename. File ' \
-            'extension can be added automatically if an output format is ' \
             'specified.'
             ))
         hbox.addWidget(self.outputFile)
@@ -280,25 +265,12 @@ class SettingsWindow(QMainWindow):
         self.outputOverwrite = QCheckBox()
         self.outputOverwrite.setCheckState(DEFAULTS['overwrite'])
         self.outputOverwrite.setToolTip('Overwrite file if it already exists')
-        self.outputFormat = QComboBox()
-        self.outputFormat.addItems(['Auto','AVI','MJPG','H264'])
-        self.outputFormat.setCurrentText(DEFAULTS['output_format'])
-        self.outputFormat.setToolTip(format_tooltip(
-            'Writer format. If Auto, will attempt to determine from ' \
-            'filename extension, or will error if no extension provided.'
-            ))
-        form.addRow('Format', self.outputFormat)
-
-        self.outputOverwrite = QCheckBox()
-        self.outputOverwrite.setCheckState(DEFAULTS['overwrite'])
-        self.outputOverwrite.setToolTip('Overwrite file if it already exists.')
         form.addRow('Overwrite', self.outputOverwrite)
 
         self.outputSaveTimestamps = QCheckBox()
         self.outputSaveTimestamps.setCheckState(DEFAULTS['save_timestamps'])
         self.outputSaveTimestamps.setToolTip(
             'Save timestamps for each frame to a corresponding CSV file'
-            'Save timestamps for each frame to a corresponding CSV file.'
             )
         form.addRow('Timestamps CSV', self.outputSaveTimestamps)
 
@@ -311,22 +283,17 @@ class SettingsWindow(QMainWindow):
         mjpg_form = QFormLayout()
         lab = BoldQLabel('MJPG Options')
         lab.setToolTip('Options applicable only for MJPG format')
-        lab.setToolTip('Options applicable only for MJPG format.')
         mjpg_form.addRow(lab)
 
         self.outputQuality = QSpinBox()
         self.outputQuality.setRange(0, 100)
         self.outputQuality.setValue(DEFAULTS['mjpg_quality'])
         self.outputQuality.setToolTip('Video quality (value between 0 and 100)')
-        self.outputQuality.setToolTip(
-            'Video quality, specified between 0-100.'
-            )
         mjpg_form.addRow('Quality', self.outputQuality)
 
         h264_form = QFormLayout()
         lab = BoldQLabel('H264 Options')
         lab.setToolTip('Options applicable only for H264 format')
-        lab.setToolTip('Options applicable only for H264 format.')
         h264_form.addRow(lab)
 
         self.outputBitrate = QSpinBox()
@@ -334,7 +301,6 @@ class SettingsWindow(QMainWindow):
         self.outputBitrate.setSingleStep(1000)
         self.outputBitrate.setValue(DEFAULTS['h264_bitrate'])
         self.outputBitrate.setToolTip('Bitrate (in bits per second)')
-        self.outputBitrate.setToolTip('Bitrate in bits per second.')
         h264_form.addRow('Bitrate', self.outputBitrate)
 
         self.outputSize = QLineEdit()
@@ -343,9 +309,6 @@ class SettingsWindow(QMainWindow):
             'Image width and height in pixels, specified as (W,H) tuple '
             '(including brackets). Must match resolution specified in video '
             'mode. If Auto, will attempt to determine from video mode.'
-            'Image width and height in pixels, specified as (W,H) tuple' \
-            '(including brackets). Must match specified video mode. ' \
-            'If Auto, will attempt to determine from video mode.'
             ))
         h264_form.addRow('Image Size', self.outputSize)
 
@@ -363,8 +326,6 @@ class SettingsWindow(QMainWindow):
         lab.setToolTip(format_tooltip(
             'Information to be embedded in top-left image pixels. To be '
             'usable, video mode must be set to monochrome.'
-            'Information to be embedded in top-left image pixels. To be ' \
-            'usable, video mode and pixel format must be set to monochrome.'
             ))
         form.addRow(lab)
 
@@ -438,6 +399,7 @@ class SettingsWindow(QMainWindow):
                 writer_kwargs['encoder'] = None
             else:
                 writer_kwargs['encoder'] = self.outputEncoder.currentText()
+
             if self.outputFormat.currentText() == 'Auto':
                 writer_kwargs['file_format'] = None
             else:
@@ -542,7 +504,6 @@ class RunnerWindowBase(QMainWindow):
         self.imgQLabel.setAlignment(Qt.AlignCenter)
         vbox.addWidget(self.imgQLabel, Qt.AlignRight)
 
-
         # Add buttons
         self.startBtn = QPushButton('Start Capture')
         self.startBtn.clicked.connect(self.on_start)
@@ -605,8 +566,7 @@ class RunnerWindowBase(QMainWindow):
         self.close()
 
 
-
-
+### Run application ###
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     win = SettingsWindow()
