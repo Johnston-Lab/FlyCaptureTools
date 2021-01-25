@@ -146,21 +146,31 @@ Commandline flags
 
 -p, --properties
     List of properties to extract from frames: must match the properties
-    embedded in the image. See PyCaputre2 documentation or
+    embedded in the images. See PyCaputre2 documentation or
     FlyCaptureUtils.Camera.openVideoWriter docstring for available properties.
 
 -o, --output (optional)
-    Path(s) to output CSV file(s). A .csv extension will be appended if one isn't
-    provided. If no output files are provided, ones will be automatcially
-    generated based on the name and location of the input files.
+    Path(s) to output CSV file(s). A .csv extension will be appended if one
+    isn't provided. If no output files are provided, ones will be automatcially
+    generated based on the names and locations of the input files.
 
 Example usage
 -------------
+# Process timestamps from a single clip
 > python extract_embedded_image_info.py -i clip0.avi -p timestamp \\
     -o clip0-embedded_info.csv
 
-"""
+# Process timestamps from multiple clips
+> python extract_embedded_image_info.py -i clip0.avi clip1.avi -p timestamp \\
+    -o clip0-embedded_info.csv clip1-embedded_info.csv
 
+# If there are lots of clips, we can save on typing using wildcard expansion,
+# though we have to let the script allocate default output filenames.
+# This is platform specific. The following should work for Windows Powershell:
+> python extract_embedded_image_info.py -i (Get-ChildItem clip*.avi) \\
+    -p timestamp
+
+"""
 
     # Parse args
     parser = argparse.ArgumentParser(usage=__doc__,

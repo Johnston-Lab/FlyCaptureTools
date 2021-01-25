@@ -38,6 +38,11 @@ Example usage
       -i clip0_cam0.csv clip0_cam1.csv clip0_cam2.csv -o clip0_multi.xlsx \\
       -i clip1_cam0.csv clip1_cam1.csv clip1_cam2.csv -o clip1_multi.xlsx
 
+# If there are lots of files, we can save on typing with wildcard expansion.
+# This is platform specific. The following should work for Windows Powershell:
+> python analyse_timestamps.py \\
+    -i (Get-ChildItem clip0_cam*.csv) -o clip0_multi.xlsx \\
+    -i (Get-ChildItem clip1_cam*.csv) -o clip1_multi.xlsx
 """
 
 import os
@@ -114,7 +119,8 @@ if len(infiles) != len(out_xlfiles):
     raise OSError('Input and output flags must be specified same number of times')
 
 # Loop file groups
-for infile_group, out_xlfile in zip(infiles, out_xlfiles):
+for i, (infile_group, out_xlfile) in enumerate(zip(infiles, out_xlfiles)):
+    print(f'Group {i}: {infile_group}')
 
     ## Load data ##
     # Check outfile
@@ -128,7 +134,8 @@ for infile_group, out_xlfile in zip(infiles, out_xlfiles):
     # Load data
     nCams = len(infile_group)
     all_df = {}
-    for i, infile in enumerate(sorted(infile_group)):
+    for j, infile in enumerate(sorted(infile_group)):
+        print(f'\tFile {j}: {infile}')
         # Load csv
         cam_df = pd.read_csv(infile)
 
@@ -144,7 +151,7 @@ for infile_group, out_xlfile in zip(infiles, out_xlfiles):
         try:
             camID = re.findall('cam[0-9]+', infile)[0]
         except:
-            camID = i
+            camID = str(j)
 
         # camID needs to be unique!
         if camID in all_df.keys():
@@ -157,14 +164,15 @@ for infile_group, out_xlfile in zip(infiles, out_xlfiles):
     if nCams > 1:
         max_frameN = max(len(cam_df) for cam_df in all_df.values())
         wide_timestamps = np.full([max_frameN, nCams], np.nan)
-        for i, cam_df in enumerate(all_df.values()):
-            wide_timestamps[:len(cam_df), i] = cam_df['timestamp']
+        for j, cam_df in enumerate(all_df.values()):
+            wide_timestamps[:len(cam_df), j] = cam_df['timestamp']
 
         synchrony = wide_timestamps - np.nanmean(wide_timestamps, axis=1)[:,None]
         synchrony = pd.DataFrame(synchrony, columns=all_df.keys())
 
 
     ## Save to excel ##
+    print('\tSaving...')
     writer = pd.ExcelWriter(out_xlfile)
 
     for camID, cam_df in all_df.items():
@@ -177,39 +185,40 @@ for infile_group, out_xlfile in zip(infiles, out_xlfiles):
 
 
     ## Plots ##
+    print('\tPlotting...')
 
     # Line plots and histograms of frame durs #
     fig, axes = plt.subplots(nrows=2, ncols=nCams, figsize=(3*nCams, 7),
                              sharey='row', sharex='row', squeeze=False,
                              gridspec_kw={'hspace':0.3})
 
-    for i, (camID, cam_df) in enumerate(all_df.items()):
-        color = COLORS[i % len(COLORS)]
+    for j, (camID, cam_df) in enumerate(all_df.items()):
+        color = COLORS[j % len(COLORS)]
         framedurs = cam_df['framedur']
 
         # Trace of first N frames
         N = min(200, len(framedurs))
-        ax1 = axes[0, i]
+        ax1 = axes[0, j]
         ax1.plot(range(N), framedurs[:N], color=color)
         ax1.set_ylim(bottom=0.03, top=min(0.15, ax1.get_ylim()[1] + 5))
         ax1.set_xlim(0, N)
         ax1.set_title(str(camID), fontsize=16, color=color)
         ax1.set_xlabel('Frame Number', fontsize=14)
-        if i == 0:
+        if j == 0:
             ax1.set_ylabel('Frame Duration (secs)', fontsize=14)
         ax1.tick_params(labelsize=12)
 
         # Histogram of all frames
-        ax2 = axes[1, i]
+        ax2 = axes[1, j]
         bin_max = min(0.15, framedurs.max()) + 0.005
         ax2.hist(framedurs, bins=np.arange(0, bin_max, 0.005), color=color)
         ax2.set_xlabel('Frame Duration (secs)', fontsize=14)
-        if i == 0:
+        if j == 0:
             ax2.set_ylabel('Frequency', fontsize=14)
         ax2.tick_params(labelsize=12)
 
         # Row labels
-        if i == (nCams - 1):
+        if j == (nCams - 1):
             ax1.text(1.1, 0.5, f'Trace (first {N} frames)', fontsize=14,
                      weight='bold', rotation=-90, ha='left', va='center',
                      transform=ax1.transAxes)
