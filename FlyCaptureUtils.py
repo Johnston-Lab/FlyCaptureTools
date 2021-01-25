@@ -370,7 +370,7 @@ class Camera(object):
 
     def openVideoWriter(self, filename, encoder=None, overwrite=False,
                         quality=75, bitrate=1000000, img_size=None,
-                        csv_timestamps=True, embed_image_info=None):
+                        csv_timestamps=True, embed_image_info=['timestamp']):
         """
         Opens a video writer. Subsequent calls to .get_image() will
         additionally write those frames out to the file.
@@ -402,13 +402,18 @@ class Camera(object):
         csv_timestamps : bool, optional
             If True, timestamps for each frame will be saved to a csv file
             corresponding to the output video file. The default is True.
+            Note that to get 1394 cycle timestamps (more accurate), the
+            timestamp property MUST be enabled within the embedded image info.
         embed_image_info : list or 'all' or None, optional
             List of properties to embed within top-left image pixels. Note that
             video MUST be monochrome for pixel values to be usable. Available
             properties are: [timestamp, gain, shutter, brightness, exposure,
             whiteBalance, frameCounter, strobePattern, ROIPosition].
             Alternatively specify 'all' to use all available properties.
-            Specify None to not embed any properties. The default is None.
+            Specify None to not embed any properties. The timestamp property
+            MUST be enabled to get 1394 cycle timestamps in the CSV file
+            (if applicable), regardless of whether the embedded information
+            itself is going to be used. The default is to embed timestamps.
         """
 
         # Try to auto-determine file format if unspecified
@@ -453,7 +458,10 @@ class Camera(object):
         props = dict((k, False) for k in prop_keys)
 
         if embed_image_info:
-            if (embed_image_info == 'all') or ('all' in embed_image_info):
+            if not isinstance(embed_image_info, (list, tuple)):
+                embed_image_info = [embed_image_info]
+
+            if 'all' in embed_image_info:
                 for k in prop_keys:
                     props[k] = getattr(available_info, k)
             else:  # use specified values

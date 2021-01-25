@@ -346,8 +346,6 @@ def multi_main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
 
             # Display
             cv2.imshow(winName, viewport)
-
-            # Display
             k = cv2.waitKey(1)
             if k == 27:
                 KEEPGOING = False
@@ -489,7 +487,7 @@ Example usage
                         help='Bitrate. Only applicable for H264 format')
     parser.add_argument('--no-timestamps', action='store_false',
                         help='Specify to NOT save timestamps to csv')
-    parser.add_argument('--embed-image-info', nargs='+',
+    parser.add_argument('--embed-image-info', nargs='+', default=['timestamp'],
                         choices=['all','timestamp','gain','shutter',
                                  'brightness','exposure','whiteBalance',
                                  'frameCounter','strobePattern','ROIPosition'],
@@ -549,7 +547,8 @@ Example usage
             writer_kwargs['img_size'] = args.output_size
         if args.output_bitrate is not None:
             writer_kwargs['bitrate'] = args.output_bitrate
-        writer_kwargs['embed_image_info'] = args.embed_image_info
+        if args.embed_image_info is not None:
+            writer_kwargs['embed_image_info'] = args.embed_image_info
         writer_kwargs['csv_timestamps'] = args.no_timestamps  # False if flag IS specified
 
     pixel_format = args.pixel_format
