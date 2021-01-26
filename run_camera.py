@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import warnings
 import argparse
 import time
 import traceback
@@ -93,7 +92,7 @@ class ParallelCamera(Process):
             # Go!
             cam.startCapture()
             while not self.stop_event.is_set():
-                ret, img = cam.getImage()
+                cam.getImage()
 
         # Error encountered - pass up to main process
         except Exception as e:
@@ -137,9 +136,8 @@ def single_main(cam_num, cam_kwargs, outfile, writer_kwargs, preview=False,
         Keyword arguments to Camera class's .openVideoWriter() method
         (ignored if preview is True).
     preview : bool, optional
-        If True, display live preview of video feed in OpenCV window. Cannot
-        save output video file in preview mode, and will override any output
-        settings if set to True. The default is False.
+        If True, display live preview of video feed in OpenCV window. The
+        default is False.
     pixel_format : PyCapture2.PIXEL_FORMAT value or str, optional
         Format to convert image to for preview display. Ignored if preview
         is not True. The default is BGR.
@@ -147,11 +145,6 @@ def single_main(cam_num, cam_kwargs, outfile, writer_kwargs, preview=False,
     # Need OpenCV for preview
     if preview and not HAVE_OPENCV:
         raise ImportError('OpenCV required for preview mode')
-
-    # Disable outfile for preview mode
-    if preview and outfile:
-        warnings.warn('Output will not be saved when using preview mode')
-        outfile = None
 
     # Init camera
     cam = Camera(cam_num, **cam_kwargs)
@@ -382,8 +375,7 @@ Commandline flags
 
 --preview
     Specify flag to run a live display of the camera feed in an OpenCV window.
-    Note this is only available for single (not multi) camera operation, and
-    will prevent any output files being written.
+    Note this is only available for single (not multi) camera operation.
 
 --pixel-format
     Determines colour conversion for image display. Only applicable if preview
@@ -409,9 +401,10 @@ Example usage
 > python run_camera.py -c all -o test.avi
 
 # Timestamps are embedded in pixel data by default, but image must be
-# monochrome for the values to be usable.
+# monochrome for the values to be usable. If also running a live preview,
+# the pixel format will need to be updated accordingly too.
 > python run_camera.py -c 0 -o test.avi --embed-image-info timestamp \\
-    --video-mode VM_640x480Y8
+    --video-mode VM_640x480Y8  --preview --pixel-format MONO8
 
 """
     # Parse args
