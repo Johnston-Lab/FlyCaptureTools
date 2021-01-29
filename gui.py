@@ -17,17 +17,17 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 from FlyCaptureUtils import (Camera, img2array, getAvailableCameras,
-                             VIDEO_MODES, FRAMERATES, GRAB_MODES,
-                             PIXEL_FORMATS)
+                             imgSize_from_vidMode, VIDEO_MODES, FRAMERATES,
+                             GRAB_MODES, PIXEL_FORMATS)
 
 import imageio; TEST_IMAGE = imageio.imread('imageio:chelsea.png')  # TODO
-
 
 # Assorted default parameters
 DEFAULTS = {'cam_mode':'Multi',
             'video_mode':'VM_640x480RGB',
             'framerate':'FR_30',
             'grab_mode':'BUFFER_FRAMES',
+            'preview':Qt.Unchecked,
             'pixel_format':'RGB',
             'save_output':Qt.Checked,
             'output_encoder':'Auto',
@@ -47,11 +47,12 @@ DEFAULTS = {'cam_mode':'Multi',
                              'strobePattern':Qt.Unchecked,
                              'ROIPosition':Qt.Unchecked} }
 
-def error_dlg(parent, msg, title='Error'):
+
+def error_dlg(parent, msg, title='Error', icon=QMessageBox.Critical):
     "Return error dialog"
     dlg = QMessageBox(parent)
     dlg.setWindowTitle(title)
-    dlg.setIcon(QMessageBox.Critical)
+    dlg.setIcon(icon)
     dlg.setText(msg)
     return dlg
 
@@ -69,12 +70,19 @@ def BoldQLabel(text):
     return label
 
 
-class SettingsWindow(QMainWindow):
+class MainWindow(QMainWindow):
     "Main window for selecting camera and output settings."
     def __init__(self):
         super().__init__()
+        self.findCameras()
         self.initUI()
         self.show()
+        if not self.camList:
+            error_dlg(self, 'No cameras found!', 'Warning',
+                      QMessageBox.Warning).exec_()
+
+    def findCameras(self):
+        self.camList = getAvailableCameras()
 
     def initUI(self):
         # Init central widget
@@ -82,8 +90,8 @@ class SettingsWindow(QMainWindow):
         self.setCentralWidget(self.centralWidget)
 
         # Init window
-        self.resize(600, 650)
-        self.setWindowTitle('Camera Setup')
+        self.resize(600, 700)
+        self.setWindowTitle('Camera Runner')
 
         # Init main grid layout
         grid = QGridLayout()
@@ -101,28 +109,39 @@ class SettingsWindow(QMainWindow):
         self.initOutputGroup()
         grid.addWidget(self.outputGroup, 1, 0, 1, 2)
 
+        # Add statusGroup
+        self.initStatusGroup()
+        grid.addWidget(self.statusGroup, 2, 0, 1, 2)
+
         # Add buttons
         hbox = QHBoxLayout()
         hbox.addStretch(1)
 
-        connectBtn = QPushButton('Connect')
-        connectBtn.clicked.connect(self.on_connect)
-        connectBtn.setToolTip('Connect to camera(s) and open runner window')
-        hbox.addWidget(connectBtn)
+        self.connectBtn = QPushButton('Connect')
+        self.connectBtn.clicked.connect(self.on_connect)
+        self.connectBtn.setToolTip('Connect to camera(s)')
+        hbox.addWidget(self.connectBtn)
 
-        exitBtn = QPushButton('Exit')
-        exitBtn.clicked.connect(self.on_exit)
-        exitBtn.setToolTip('Exit application')
-        hbox.addWidget(exitBtn)
+        self.startBtn = QPushButton('Start Capture')
+        self.startBtn.clicked.connect(self.on_start)
+        self.startBtn.setToolTip('Start video capture')
+        self.startBtn.setEnabled(False)
+        hbox.addWidget(self.startBtn)
 
-        grid.addLayout(hbox, 2, 0, 1, 2)
+        self.stopBtn = QPushButton('Stop Capture')
+        self.stopBtn.clicked.connect(self.on_stop)
+        self.stopBtn.setToolTip('Stop video capture')
+        self.stopBtn.setEnabled(False)
+        hbox.addWidget(self.stopBtn)
+
+        self.exitBtn = QPushButton('Exit')
+        self.exitBtn.clicked.connect(self.on_exit)
+        self.exitBtn.setToolTip('Exit application')
+        hbox.addWidget(self.exitBtn)
+
+        grid.addLayout(hbox, 3, 0, 1, 2)
 
     def initSelectCamsGroup(self):
-        # Find available cameras
-        #camlist = getAvailableCameras()
-        camlist = [('0','abc'), ('1','def'), ('2','ghi'), ('3','jkl'),
-                   ('4','mno'), ('5','pqr')]  # TODO
-
         # Init group and vbox
         self.selectCamsGroup = QGroupBox('Select Cameras')
         group_vbox = QVBoxLayout()
@@ -140,7 +159,7 @@ class SettingsWindow(QMainWindow):
         group_vbox.addLayout(hbox)
 
         # Add camera select table
-        self.cameraTable = QTableWidget(len(camlist), 3)
+        self.cameraTable = QTableWidget(len(self.camList), 3)
 
         self.cameraTable.setHorizontalHeaderLabels([None,'Camera','Serial'])
         header = self.cameraTable.horizontalHeader()
@@ -149,7 +168,7 @@ class SettingsWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         self.cameraTable.verticalHeader().setVisible(False)
 
-        for row, (cam_num, serial) in enumerate(camlist):
+        for row, (cam_num, serial) in enumerate(self.camList):
             chk = QTableWidgetItem()
             chk.setCheckState(Qt.Checked)
 
@@ -165,6 +184,8 @@ class SettingsWindow(QMainWindow):
         self.cameraTable.cellClicked.connect(self.on_camera_check)
 
         self.cameraTable.setToolTip('Select camera(s) to use')
+
+        self.set_camTable_selectivity()
 
         group_vbox.addWidget(self.cameraTable)
 
@@ -201,19 +222,33 @@ class SettingsWindow(QMainWindow):
             ))
         form.addRow('Grab mode', self.grabMode)
 
-        self.pixelFormat = QComboBox()
-        self.pixelFormat.addItems(PIXEL_FORMATS.keys())
-        self.pixelFormat.setCurrentText(DEFAULTS['pixel_format'])
-        self.pixelFormat.setToolTip(
-            'Colour mode for display: must be appropriate for video mode'
-            )
-        form.addRow('Pixel format', self.pixelFormat)
-
         self.saveOutput = QCheckBox()
         self.saveOutput.stateChanged.connect(self.on_save_output_check)
         self.saveOutput.setCheckState(DEFAULTS['save_output'])
         self.saveOutput.setToolTip('Enable/disable Output Options dialog')
         form.addRow('Save video', self.saveOutput)
+
+        self.preview = QCheckBox()
+        self.preview.setCheckState(DEFAULTS['preview'])
+        self.preview.setToolTip(
+            'Display live video preview.\n'
+            'Only available for single-camera operation.'
+            )
+        form.addRow('Preview', self.preview)
+
+        self.pixelFormat = QComboBox()
+        self.pixelFormat.addItems(PIXEL_FORMATS.keys())
+        self.pixelFormat.setCurrentText(DEFAULTS['pixel_format'])
+        self.pixelFormat.setToolTip(
+            'Colour mode for display: must be appropriate for video mode.\n'
+            'Only available for single-camera operation.'
+            )
+        form.addRow('Pixel format', self.pixelFormat)
+
+        if self.camMode.currentText() == 'Multi':
+            self.preview.setEnabled(False)
+            self.pixelFormat.setEnabled(False)
+
 
         # Update group
         self.optsGroup.setLayout(form)
@@ -347,20 +382,35 @@ class SettingsWindow(QMainWindow):
         # Update group
         self.outputGroup.setLayout(group_vbox)
 
+    def initStatusGroup(self):
+        self.statusGroup = QGroupBox('Status')
+
+        self.statusText = QLabel()
+        self.statusText.setText('Disconnected')
+        font = self.statusText.font()
+        font.setPointSize(16)
+        self.statusText.setFont(font)
+        self.statusText.setStyleSheet('QLabel {color:red}')
+        self.statusText.setAlignment(Qt.AlignCenter)
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.statusText)
+
+        self.statusGroup.setLayout(layout)
+
     def parse_settings(self):
         """
         Extract current settings.
 
         Returns
         -------
-        res : dict
-            With keys: cam_mode, cam_nums, cam_kwargs, outfile, writer_kwargs,
-            and pixel_format.
-
-        If error encountered, will return None instead.
+        res : dict or None
+            Dictionary with settings listed against keys. If error encountered
+            will return None instead.
         """
         # Misc values
         cam_mode = self.camMode.currentText()
+        preview = self.preview.isEnabled() and self.preview.isChecked()
         pixel_format = self.pixelFormat.currentText()
 
         # Cam nums
@@ -382,8 +432,10 @@ class SettingsWindow(QMainWindow):
         # Output video and writer kwargs
         if self.saveOutput.isChecked():
             outfile = self.outputFile.text()
+
+            # Error if no outfile provided and return None
             if not outfile:
-                error_dlg(self, 'Must specify filename').exec_()
+                error_dlg(self, 'Must specify filename if saving video').exec_()
                 return
 
             writer_kwargs = {
@@ -419,24 +471,19 @@ class SettingsWindow(QMainWindow):
             outfile = None
             writer_kwargs = {}
 
-        return {'cam_mode':cam_mode, 'cam_nums':cam_nums,
-                'cam_kwargs':cam_kwargs, 'outfile':outfile,
-                'writer_kwargs':writer_kwargs, 'pixel_format':pixel_format}
+        # Assign into class
+        return {'cam_mode':cam_mode,
+                'cam_nums':cam_nums,
+                'cam_kwargs':cam_kwargs,
+                'outfile':outfile,
+                'writer_kwargs':writer_kwargs,
+                'preview':preview,
+                'pixel_format':pixel_format}
 
-    def on_camera_mode_change(self, text):
-        "Re-select default cameras on camera mode change"
-        for rowN in range(self.cameraTable.rowCount()):
-            chk = QTableWidgetItem()
-            if text == 'Multi' or (text == 'Single' and rowN == 0):
-                chk.setCheckState(Qt.Checked)
-            else:
-                chk.setCheckState(Qt.Unchecked)
-            self.cameraTable.setItem(rowN, 0, chk)
-
-    def on_camera_check(self, row, col):
+    def set_camTable_selectivity(self, row=0):
         """
-        Handle change in camera check status. Specifically, handle single-cam
-        mode by ensuring selecting one camera deselects all others
+        Sets whether one or multiple cameras in table may be selected,
+        dependent on camera mode
         """
         if self.camMode.currentText() == 'Single':
             for rowN in range(self.cameraTable.rowCount()):
@@ -446,6 +493,33 @@ class SettingsWindow(QMainWindow):
                 else:
                     chk.setCheckState(Qt.Unchecked)
                 self.cameraTable.setItem(rowN, 0, chk)
+
+    def on_camera_mode_change(self, text):
+        """
+        On camera mode change: re-select default cameras & disable/enable
+        preview options
+        """
+        for rowN in range(self.cameraTable.rowCount()):
+            chk = QTableWidgetItem()
+            if text == 'Multi' or (text == 'Single' and rowN == 0):
+                chk.setCheckState(Qt.Checked)
+            else:
+                chk.setCheckState(Qt.Unchecked)
+            self.cameraTable.setItem(rowN, 0, chk)
+
+        if text == 'Single':
+            self.preview.setEnabled(True)
+            self.pixelFormat.setEnabled(True)
+        else:
+            self.preview.setEnabled(False)
+            self.pixelFormat.setEnabled(False)
+
+    def on_camera_check(self, row, col):
+        """
+        Handle change in camera check status. Specifically, handle single-cam
+        mode by ensuring selecting one camera deselects all others
+        """
+        self.set_camTable_selectivity(row)
 
     def on_fileselect_browse(self):
         "Open save file dialog"
@@ -466,61 +540,78 @@ class SettingsWindow(QMainWindow):
         settings = self.parse_settings()
         if not settings:
             return
+        print(settings)
 
-        # Init approparite runner window and hide this window
+        self.statusText.setText('Connected')
+        self.statusText.setStyleSheet('QLabel {color:green}')
+
+        self.connectBtn.setEnabled(False)
+        self.startBtn.setEnabled(True)
+
+        # Init preview window?
         # NOTE - window instance must be assigned into this class to prevent
         # it getting immediately garbage collected!
-        self.runner = RunnerWindowBase(self)
-        self.hide()
+        if settings['preview']:
+            xPos = self.pos().x() + self.size().width()
+            yPos = self.pos().y()
+            size = imgSize_from_vidMode(settings['cam_kwargs']['video_mode'])
+            self.preview_window = PreviewWindow(self, size, (xPos,yPos))
+
+    def on_start(self):
+        print('Start')
+
+        self.statusText.setText('Running')
+        self.statusText.setStyleSheet('QLabel {color:green}')
+
+        self.startBtn.setEnabled(False)
+        self.stopBtn.setEnabled(True)
+
+        if hasattr(self, 'preview_window'):
+            self.preview_window.setImage(TEST_IMAGE)  # XXX
+
+    def on_stop(self):
+        print('Stop')
+
+        self.statusText.setText('Disconnected')
+        self.statusText.setStyleSheet('QLabel {color:red}')
+
+        self.stopBtn.setEnabled(False)
+        self.connectBtn.setEnabled(True)
+
+        if hasattr(self, 'preview_window'):
+            self.preview_window.close()
 
     def on_exit(self):
+        print('Exit')
+
+        if hasattr(self, 'preview_window'):
+            self.preview_window.close()
+
         self.close()
 
 
-class RunnerWindowBase(QMainWindow):
-    "Base class for runner window"
-    def __init__(self, parent, winsize=(640,500)):
+class PreviewWindow(QMainWindow):
+    "Class for video preview pop-up"
+    def __init__(self, parent, winsize=(640,480), pos=(0,0)):
         super().__init__(parent)
         self.parent = parent
         self.winsize = winsize
+        self.pos = pos
         self.initUI()
         self.show()
 
     def initUI(self):
-        # Init central widget
-        self.centralWidget = QWidget()
-        self.setCentralWidget(self.centralWidget)
-
         # Init window
+        self.setWindowTitle('Preview')
         self.resize(*self.winsize)
-        self.setWindowTitle('Runner')
+        self.move(*self.pos)
 
-        # Init main vbox
-        vbox = QVBoxLayout()
-        self.centralWidget.setLayout(vbox)
-
-        # Add label for pixmap
+        # Add label for pixmap, allocate as central widget
         self.imgQLabel = QLabel()
         self.imgQLabel.setAlignment(Qt.AlignCenter)
-        vbox.addWidget(self.imgQLabel, Qt.AlignRight)
+        self.setCentralWidget(self.imgQLabel)
 
-        # Add buttons
-        self.startBtn = QPushButton('Start Capture')
-        self.startBtn.clicked.connect(self.on_start)
-
-        self.stopBtn = QPushButton('Stop Capture')
-        self.stopBtn.clicked.connect(self.on_stop)
-        self.stopBtn.setEnabled(False)
-
-        btn_hbox = QHBoxLayout()
-        btn_hbox.addStretch()
-        btn_hbox.addWidget(self.startBtn)
-        btn_hbox.addWidget(self.stopBtn)
-        btn_hbox.addStretch()
-
-        vbox.addLayout(btn_hbox, Qt.AlignBottom)
-
-    def set_image(self, im):
+    def setImage(self, im):
         """
         Takes image (as numpy array) and updates QLabel display.
 
@@ -548,26 +639,9 @@ class RunnerWindowBase(QMainWindow):
         qpixmap = QPixmap(qimg).scaled(self.imgQLabel.size(), Qt.KeepAspectRatio)
         self.imgQLabel.setPixmap(qpixmap)
 
-    def on_start(self):
-        "Start camera capture"
-        print('Start')
-        self.startBtn.setEnabled(False)
-        self.stopBtn.setEnabled(True)
-        self.set_image(TEST_IMAGE)
-
-    def on_stop(self):
-        "Stop camera capture and close runner window"
-        print('Stop')
-        self.startBtn.setEnabled(True)
-        self.stopBtn.setEnabled(False)
-        self.imgQLabel.clear()
-
-        self.parent.show()
-        self.close()
-
 
 ### Run application ###
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    win = SettingsWindow()
+    win = MainWindow()
     sys.exit(app.exec_())
