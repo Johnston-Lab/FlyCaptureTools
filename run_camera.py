@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Contains functions for running camera capture (from either one or multiple
+cameras), and provides a commandline user interface.
+"""
 
 import os
 import argparse
-import time
-import traceback
 import keyboard
-from multiprocessing import Process, Event, Queue
-from queue import Empty as QueueEmpty
 from FlyCaptureUtils import Camera, img2array, getAvailableCameras
 
 # OpenCV only needed for (optional) live preview, so allow for not having it
@@ -25,150 +25,86 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     "Combines argparse formatters"
     pass
 
-class ParallelCamera(Process):
-    def __init__(self, start_event, stop_event, cam_num, cam_kwargs, outfile,
-                 writer_kwargs, *args, **kwargs):
-        """
-        Class supports running camera within parallel child process.
-
-        Arguments
-        ---------
-        start_event : multiprocessing.Event object
-            Child process will block after barrier till start event is set.
-            Allows main process to signal to start acquisition.
-        stop_event : multiprocessing.Event object
-            Child process will continue execution till stop event is set.
-            Allows main process to signal to stop acquisition.
-        cam_num, cam_kwargs
-            As per Camera class.
-        outfile, writer_kwargs
-            As per Camera.openVideoWriter function.
-        *args, **kwargs
-            Further arguments passed to multiprocessing.Process
-
-        Attributes
-        ----------
-        self.ready_event : multiprocessing.Event object
-            Will be set when camera initialisation has finished. Can be used
-            to signal main process when camera is ready to start acquisition.
-        self.error_queue : multiprocessing.Queue object
-            Queue will pass error instances back up to main process.
-        """
-        # Allocate args to class
-        self.start_event = start_event
-        self.stop_event = stop_event
-        self.cam_num = cam_num
-        self.cam_kwargs = cam_kwargs
-        self.outfile = outfile
-        self.writer_kwargs = writer_kwargs
-
-        # Init further internal attributes
-        self.ready_event = Event()
-        self.error_queue = Queue()
-
-        # Super call implements inheritance from multiprocessing.Process
-        super(ParallelCamera, self).__init__(*args, **kwargs)
-
-    def run(self):
-        """
-        Overwrite multiprocessing.Process.run method.  Gets called in its
-        place when the process's .start() method is called.
-        """
-        # Everything in try block to handle errors
-        try:
-            # Init cam
-            cam = Camera(self.cam_num, **self.cam_kwargs)
-
-            # Init video writer?
-            if self.outfile is not None:
-                cam.openVideoWriter(self.outfile, **self.writer_kwargs)
-
-            # Signal main process we're ready
-            self.ready_event.set()
-
-            # Wait for start event to signal go
-            self.start_event.wait()
-
-            # Go!
-            cam.startCapture()
-            while not self.stop_event.is_set():
-                cam.getImage()
-
-        # Error encountered - pass up to main process
-        except Exception as e:
-            self.error_queue.put(e)
-
-        ## Will reach here if stop event is set, or if error is encountered.
-        ## Either way, close and finish up:
-        # 1) Try to stop and close camera
-        try:
-            cam.stopCapture()
-        except:
-            pass
-        try:
-            cam.close()
-        except:
-            pass
-
-        # 2) Close queues. We need to cancel queue joining otherwise child
-        # process can block while trying to exit if queue wasn't
-        # completely flushed.
-        self.error_queue.close()
-        self.error_queue.cancel_join_thread()
-
 
 ### Function definitions ###
 
-def single_main(cam_num, cam_kwargs, outfile, writer_kwargs, preview=False,
-                pixel_format='BGR'):
+def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, preview=False,
+          pixel_format='BGR'):
     """
     Main function for single camera operation.
 
     Parameters
     ----------
-    cam_num : int
-        Camera numer to use
+    cam_nums : list
+        List of camera numbers to use.
     cam_kwargs : dict
         Keyword arguments to Camera class (excluding cam_num)
-    outfile : str or None
-        Output video file (ignored if preview == True)
+    base_outfile : str or None
+        Output video file name. If multiple cameras are specified, the camera
+        numbers will be appended to the filename. If only one camera is
+        specified, the filename will be used as is.
     writer_kwargs : dict
-        Keyword arguments to Camera class's .openVideoWriter() method
-        (ignored if preview is True).
+        Keyword arguments to Camera class's .openVideoWriter() method.
     preview : bool, optional
-        If True, display live preview of video feed in OpenCV window. The
-        default is False.
+        If True, display live preview of video feed in OpenCV window. Only
+        allowable for single camera operation, and will raise an error if set
+        to True with multiple cameras. The default is False.
     pixel_format : PyCapture2.PIXEL_FORMAT value or str, optional
         Format to convert image to for preview display. Ignored if preview
         is not True. The default is BGR.
     """
+    # Check if we have one or multiple cameras
+    cam_mode = 'multi' if len(cam_nums) > 1 else 'single'
+
+    # Preview mode only supported for single cam operation
+    if cam_mode == 'multi' and preview:
+        raise Exception('Preview mode not supported for multi-camera operation')
+
     # Need OpenCV for preview
     if preview and not HAVE_OPENCV:
         raise ImportError('OpenCV required for preview mode')
 
-    # Init camera
-    cam = Camera(cam_num, **cam_kwargs)
+    # Set up cameras
+    cams = []
+    for cam_num in cam_nums:
+        if (cam_mode == 'multi') and (base_outfile is not None):
+            _outfile, ext = os.path.splitext(base_outfile)
+            outfile = _outfile + f'-cam{cam_num}' + ext
+        else:
+            outfile = base_outfile
 
-    # Init video writer?
-    if outfile is not None:
-        cam.openVideoWriter(outfile, **writer_kwargs)
+        these_cam_kwargs = cam_kwargs.copy()
+        these_cam_kwargs['cam_num'] = cam_num
+
+        cam = Camera(**these_cam_kwargs)
+        if outfile:
+            cam.openVideoWriter(outfile, **writer_kwargs)
+
+        cams.append(cam)
 
     # Report ready
-    input('Ready - Enter to begin')
+    print('Ready - Enter to begin')
+    keyboard.wait('enter')
 
     # Open display window?
     if preview:
         winName = 'Preview'
         cv2.namedWindow(winName)
 
-    # Start capture
-    cam.startCapture()
-    print('Running - Esc or q to quit')
+    # Start
+    for cam in cams:
+        cam.startCapture()
 
-    # Loop
-    while True:
-        ret, img = cam.getImage()
-        if preview and ret:
+    # Begin main loop
+    print('Running - Esc or q to quit')
+    KEEPGOING = True
+    while KEEPGOING:
+        # Acquire images
+        for cam in cams:
+            ret, img = cam.getImage()
+
+        # Display (single-cam + preview mode only)
+        if ret and preview:
             # Possible bug fix - converting image to array TWICE seems to
             # prevent image corruption?!
             img2array(img, pixel_format)
@@ -176,141 +112,29 @@ def single_main(cam_num, cam_kwargs, outfile, writer_kwargs, preview=False,
             cv2.imshow(winName, frame)
             cv2.waitKey(1)
 
-        if keyboard.is_pressed('q') or keyboard.is_pressed('esc'):
-            break
-
-    # Stop capture
-    cam.stopCapture()
-
-    # Close camera and exit
-    cam.close()
-    if preview:
-        cv2.destroyWindow(winName)
-    print('\nDone\n')
-
-
-def multi_main(cam_nums, cam_kwargs, base_outfile, writer_kwargs):
-    """
-    Main function for multiple camera operation.
-
-    Parameters
-    ----------
-    cam_nums : list
-        List of camera numbers to use.
-    cam_kwargs : dict
-        Keyword arguments to Camera class (excluding cam_num).
-    base_outfile : str or None
-        Base output video file path. Will adjust to append camera numbers.
-    writer_kwargs : dict
-        Keyword arguments to Camera class's .openVideoWriter() method.
-    """
-    # Set up events and barriers
-    nCams = len(cam_nums)
-    start_event = Event()
-    stop_event = Event()
-
-    # Set up camera processes
-    parCams = []
-    for cam_num in cam_nums:
-        if base_outfile is not None:
-            _outfile, ext = os.path.splitext(base_outfile)
-            outfile = _outfile + f'-cam{cam_num}' + ext
-        else:
-            outfile = None
-
-        these_cam_kwargs = cam_kwargs.copy()
-        these_cam_kwargs['cam_num'] = cam_num
-
-        parCam = ParallelCamera(start_event, stop_event, cam_num, cam_kwargs,
-                                outfile, writer_kwargs, name=f'cam{cam_num}')
-        parCam.start()
-        parCams.append(parCam)
-
-    # Wait till all child processes signal ready
-    timeout = 5
-    all_ready = [False] * nCams
-    t0 = time.time()
-    KEEPGOING = True
-    while KEEPGOING:
-        for i, parCam in enumerate(parCams):
-            all_ready[i] = parCam.ready_event.is_set()
-            try:
-                e = parCam.error_queue.get_nowait()
-                print(f'Camera ({parCam.name}) errored during initialisation')
-                print(e)
-                KEEPGOING = False
-                break
-            except QueueEmpty:
-                pass
-        if all(all_ready) or time.time() - t0 >= timeout:
+        # Check for quit signal
+        if keyboard.is_pressed('esc') or keyboard.is_pressed('q'):
+            print('Quitting...')
             KEEPGOING = False
 
-    # If initialisation failed, terminate child processes and exit
-    if not all(all_ready):
-        failed_cams = [parCam.name for success, parCam in \
-                       zip(all_ready, parCams) if not success]
-        print('Following cameras failed to initialise: ' + ', '.join(failed_cams))
-        print('Terminating all camera processes and exiting')
-        stop_event.set()
-        start_event.set()
-        for parCam in parCams:
-            parCam.join(timeout=5)
-            if (parCam.exitcode is None) or (parCam.exitcode < 0):
-                parCam.terminate()
-        return
-    # Otherwise, good to go
-    else:
-        input('Ready - Enter to begin')
+    # Stop and exit
+    for cam in cams:
+        cam.stopCapture()
+        cam.close()
 
-    # Send go signal
-    start_event.set()
-
-    # Begin display loop - all in try block so we can kill child processes in
-    # case of main process error
-    print('Running - Esc or q to quit')
-    try:
-        KEEPGOING = True
-        while KEEPGOING:
-            # Check each camera process is still alive. Stop if not.
-            for parCam in parCams:
-                if not parCam.is_alive():
-                    print(f'Camera ({parCam.name} died, exiting')
-                    try:
-                        e = parCam.error_queue.get(timeout=0.5)
-                        print(e)
-                    except QueueEmpty:
-                        pass
-                    KEEPGOING = False
-                    break
-
-            # Check for quit signal
-            if keyboard.is_pressed('esc') or keyboard.is_pressed('q'):
-                print('Quitting...')
-                KEEPGOING = False
-
-    except Exception:  # main process errored
-        traceback.print_exc()
-
-    ## Will reach here if user signals to stop, or if error encountered.
-    ## Either way, stop and exit:
-    # 1) Signal cameras to stop
-    stop_event.set()
-
-    # 2) Check processes have exited cleanly. Terminate them if not.
-    for parCam in parCams:
-        parCam.join(timeout=5)
-        if (parCam.exitcode is None) or (parCam.exitcode < 0):
-            print('Force terminating {parCam.name}')
-            parCam.terminate()
+    if preview:
+        cv2.destroyWindow(winName)
 
     print('\nDone\n')
+
+
 
 
 if __name__ == '__main__':
     doc="""
-Script for running camera acquisition and providing a live display.
+Script for running camera acquisition.
 
-Can either run from commandline, or import functions for custom usage.
+Can either run from commandline, or import main function for custom usage.
 
 Commandline flags
 -----------------
@@ -321,10 +145,8 @@ Commandline flags
     List available cameras and exit.
 
 -c, --cam-nums
-    Space delimited list of cameras to use, or 'all'. If only one camera
-    specified, will be run in main process. If multiple cameras specified,
-    will run each in parallel child process. If 'all' specified, will run
-    all available cameras. Use --ls flag to see available cameras.
+    Space delimited list of cameras to use, or 'all' to use all available
+    cameras. Use --ls flag to see available cameras.
 
 --video-mode
     Determines resolution and colour space for image acquisition. Can be a
@@ -394,10 +216,10 @@ Example usage
 # Run single camera, save to video file
 > python run_camera.py -c 0 -o test.avi
 
-# Run multiple cameras in parallel, save to video files
+# Run multiple cameras, save to video files
 > python run_camera.py -c 0 1 2 -o test.avi
 
-# Run all available cameras in parallel
+# Run all available cameras, save to video files
 > python run_camera.py -c all -o test.avi
 
 # Timestamps are embedded in pixel data by default, but image must be
@@ -482,21 +304,12 @@ Example usage
     if not cam_nums:
        raise OSError('-c/--cam-nums argument is required')
 
+    # Process and format args
     if 'all' in cam_nums:
         cam_nums = sorted([num_ser[0] for num_ser in AVAILABLE_CAMS])
+        print('Using: ' + ', '.join([f'cam{n}' for n in cam_nums]))
     else:
         cam_nums = list(map(int, cam_nums))
-
-    if len(cam_nums) > 1:
-        mode = 'multi'
-        print('Running multiple cameras in parallel')
-    else:
-        mode = 'single'
-        cam_num = cam_nums[0]  # unlist
-        print('Running single camera')
-
-    if mode == 'multi' and preview:
-        raise OSError('Preview mode not supported for multi-camera operation')
 
     cam_kwargs = {}
     if video_mode is not None:
@@ -521,7 +334,4 @@ Example usage
         writer_kwargs['csv_timestamps'] = no_timestamps  # False if flag IS specified
 
     # Go
-    if mode == 'single':
-        single_main(cam_num, cam_kwargs, outfile, writer_kwargs, preview, pixel_format)
-    elif mode == 'multi':
-        multi_main(cam_nums, cam_kwargs, outfile, writer_kwargs)
+    main(cam_nums, cam_kwargs, outfile, writer_kwargs, preview, pixel_format)
