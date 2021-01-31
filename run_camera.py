@@ -6,6 +6,7 @@ cameras), and provides a commandline user interface.
 """
 
 import os
+import sys
 import argparse
 import keyboard
 from FlyCaptureUtils import Camera, img2array, getAvailableCameras
@@ -271,6 +272,11 @@ Example usage
                              'PyCapture2.PIXEL_FORMAT code or lookup key.')
 
     args = parser.parse_args()
+
+    # If no args, print help and exit
+    if not len(sys.argv) > 1:
+        parser.print_help()
+        sys.exit(0)
 
     # Check avialable cameras
     AVAILABLE_CAMS = getAvailableCameras()
