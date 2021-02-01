@@ -9,10 +9,17 @@ TODOs:
     * Add video streaming code
     * Set up child runners for single / multi cam operation
     * Set up threading to update video display
+        > Actually threading doesn't seem to work so well. We can just put
+          it in a main loop, and use QApplication.processEvents() to check
+          on GUI every now and then. Might work better?
 """
 
+import os
 import sys
 import textwrap
+import functools
+import time
+import numpy as np
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
@@ -48,6 +55,7 @@ DEFAULTS = {'cam_mode':'Multi',
                              'ROIPosition':Qt.Unchecked} }
 
 
+### External utility functions ###
 def error_dlg(parent, msg, title='Error', icon=QMessageBox.Critical):
     "Return error dialog"
     dlg = QMessageBox(parent)
@@ -69,21 +77,56 @@ def BoldQLabel(text):
     label.setFont(font)
     return label
 
+def errorHandler(func):
+    """
+    Decorator for handling errors in MainWindow GUI. Need to define outside
+    of class, but should only be used for MainWindow class.
 
+    If error encountered will stop and close cameras and preview window,
+    and display the error in dialogue.
+
+    If using to decorate a slot, the method must first by decorated with the
+    @pyqtSlot() decorator to prevent the slot args being passed to this
+    decorator.
+    """
+    # functools.wraps is used to make sure names and docstrings etc are
+    # assigned properly from given func, and also seems to be needed to
+    # prevent decorator swallowing function output (e.g. printed output
+    # disappears, and preview window can't be opened otherwise?)
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            errType, errValue, tb = sys.exc_info()
+            import traceback; traceback.print_tb(tb)  # TODO
+            self.on_error(e)
+    return wrapper
+
+
+### Main class definitions ###
 class MainWindow(QMainWindow):
     "Main window for selecting camera and output settings."
     def __init__(self):
         super().__init__()
-        self.findCameras()
+
+        # Placeholders, may be filled later
+        self.CAM_HANDLES = []
+        self.SETTINGS = None
+
+        # Find available cameras
+        self.AVAILABLE_CAMERAS = getAvailableCameras()
+
+        # Init gui
         self.initUI()
         self.show()
-        if not self.camList:
+
+        # Display warning if no cameras found
+        if not self.AVAILABLE_CAMERAS:
             error_dlg(self, 'No cameras found!', 'Warning',
                       QMessageBox.Warning).exec_()
 
-    def findCameras(self):
-        self.camList = getAvailableCameras()
-
+    ## Initialisation functions for GUI elements ##
     def initUI(self):
         # Init central widget
         self.centralWidget = QWidget()
@@ -122,13 +165,13 @@ class MainWindow(QMainWindow):
         self.connectBtn.setToolTip('Connect to camera(s)')
         hbox.addWidget(self.connectBtn)
 
-        self.startBtn = QPushButton('Start Capture')
+        self.startBtn = QPushButton('Start')
         self.startBtn.clicked.connect(self.on_start)
         self.startBtn.setToolTip('Start video capture')
         self.startBtn.setEnabled(False)
         hbox.addWidget(self.startBtn)
 
-        self.stopBtn = QPushButton('Stop Capture')
+        self.stopBtn = QPushButton('Stop')
         self.stopBtn.clicked.connect(self.on_stop)
         self.stopBtn.setToolTip('Stop video capture')
         self.stopBtn.setEnabled(False)
@@ -159,7 +202,7 @@ class MainWindow(QMainWindow):
         group_vbox.addLayout(hbox)
 
         # Add camera select table
-        self.cameraTable = QTableWidget(len(self.camList), 3)
+        self.cameraTable = QTableWidget(len(self.AVAILABLE_CAMERAS), 3)
 
         self.cameraTable.setHorizontalHeaderLabels([None,'Camera','Serial'])
         header = self.cameraTable.horizontalHeader()
@@ -168,7 +211,7 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         self.cameraTable.verticalHeader().setVisible(False)
 
-        for row, (cam_num, serial) in enumerate(self.camList):
+        for row, (cam_num, serial) in enumerate(self.AVAILABLE_CAMERAS):
             chk = QTableWidgetItem()
             chk.setCheckState(Qt.Checked)
 
@@ -237,7 +280,7 @@ class MainWindow(QMainWindow):
         form.addRow('Preview', self.preview)
 
         self.pixelFormat = QComboBox()
-        self.pixelFormat.addItems(PIXEL_FORMATS.keys())
+        self.pixelFormat.addItems(['RGB','MONO8'])
         self.pixelFormat.setCurrentText(DEFAULTS['pixel_format'])
         self.pixelFormat.setToolTip(
             'Colour mode for display: must be appropriate for video mode.\n'
@@ -386,27 +429,30 @@ class MainWindow(QMainWindow):
         self.statusGroup = QGroupBox('Status')
 
         self.statusText = QLabel()
-        self.statusText.setText('Disconnected')
+        self.statusText.setAlignment(Qt.AlignCenter)
         font = self.statusText.font()
         font.setPointSize(16)
         self.statusText.setFont(font)
-        self.statusText.setStyleSheet('QLabel {color:red}')
-        self.statusText.setAlignment(Qt.AlignCenter)
+        self.setStatus('Disconnected', 'red')
 
         layout = QHBoxLayout()
         layout.addWidget(self.statusText)
 
         self.statusGroup.setLayout(layout)
 
-    def parse_settings(self):
-        """
-        Extract current settings.
 
-        Returns
-        -------
-        res : dict or None
-            Dictionary with settings listed against keys. If error encountered
-            will return None instead.
+    ## Utility functions for handling gui and camera operation ##
+    def setStatus(self, text, color=None):
+        """
+        Update status text, and optionally the colour
+        """
+        self.statusText.setText(text)
+        if color:
+            self.statusText.setStyleSheet('QLabel {color:' + color + '}')
+
+    def extract_settings(self):
+        """
+        Extract current settings, updates .settings attribute
         """
         # Misc values
         cam_mode = self.camMode.currentText()
@@ -422,7 +468,6 @@ class MainWindow(QMainWindow):
                 cam_nums.append(cam_num)
         if cam_mode == 'Single':
             assert(len(cam_nums) == 1)
-            cam_nums = cam_nums[0]
 
         # Cam kwargs
         cam_kwargs = {'video_mode':self.vidMode.currentText(),
@@ -435,12 +480,12 @@ class MainWindow(QMainWindow):
 
             # Error if no outfile provided and return None
             if not outfile:
-                error_dlg(self, 'Must specify filename if saving video').exec_()
-                return
+                raise Exception('Must specify file name')
+                #error_dlg(self, 'Must specify filename if saving video').exec_()
+                #return
 
             writer_kwargs = {
-                'file_format':self.outputEncoder.currentText(),
-                'file_format':self.outputFormat.currentText(),
+                'encoder':self.outputEncoder.currentText(),
                 'overwrite':self.outputOverwrite.isChecked(),
                 'csv_timestamps':self.outputSaveTimestamps.isChecked(),
                 'quality':self.outputQuality.value(),
@@ -452,33 +497,33 @@ class MainWindow(QMainWindow):
             else:
                 writer_kwargs['encoder'] = self.outputEncoder.currentText()
 
-            if self.outputFormat.currentText() == 'Auto':
-                writer_kwargs['file_format'] = None
+            if self.outputEncoder.currentText() == 'Auto':
+                writer_kwargs['encoder'] = None
             else:
-                writer_kwargs['file_format'] = self.outputFormat.currentText()
+                writer_kwargs['encoder'] = self.outputEncoder.currentText()
 
             if self.outputSize.text() == 'Auto':
                 writer_kwargs['img_size'] = None
             else:
                 writer_kwargs['img_size'] = eval(self.outputSize.text())
 
-            writer_kwargs['embedded_image_info'] = []
+            writer_kwargs['embed_image_info'] = []
             for prop, widget in self.outputEmbeddedImageInfo.items():
                 if widget.isChecked():
-                    writer_kwargs['embedded_image_info'].append(prop)
+                    writer_kwargs['embed_image_info'].append(prop)
 
         else:  # don't save video
             outfile = None
             writer_kwargs = {}
 
         # Assign into class
-        return {'cam_mode':cam_mode,
-                'cam_nums':cam_nums,
-                'cam_kwargs':cam_kwargs,
-                'outfile':outfile,
-                'writer_kwargs':writer_kwargs,
-                'preview':preview,
-                'pixel_format':pixel_format}
+        self.SETTINGS =  {'cam_mode':cam_mode,
+                          'cam_nums':cam_nums,
+                          'cam_kwargs':cam_kwargs,
+                          'outfile':outfile,
+                          'writer_kwargs':writer_kwargs,
+                          'preview':preview,
+                          'pixel_format':pixel_format}
 
     def set_camTable_selectivity(self, row=0):
         """
@@ -494,6 +539,44 @@ class MainWindow(QMainWindow):
                     chk.setCheckState(Qt.Unchecked)
                 self.cameraTable.setItem(rowN, 0, chk)
 
+    def connect_cameras(self):
+        """
+        Connect to cameras
+        """
+        settings = self.SETTINGS  # for brevity
+        print(settings)
+
+        if not settings['cam_nums']:
+            raise Exception('No cameras selected')
+
+        for cam_num in settings['cam_nums']:
+            if (settings['cam_mode'] == 'Multi') \
+                and (settings['outfile'] is not None):
+                _outfile, ext = os.path.splitext(settings['outfile'])
+                outfile = _outfile + f'-cam{cam_num}' + ext
+            else:
+                outfile = settings['outfile']
+
+            these_cam_kwargs = settings['cam_kwargs'].copy()
+            these_cam_kwargs['cam_num'] = cam_num
+
+            cam = Camera(**these_cam_kwargs)
+            if outfile:
+                cam.openVideoWriter(outfile, **settings['writer_kwargs'])
+
+            self.CAM_HANDLES.append(cam)
+
+    def close_preview(self):
+        """
+        If preview window open, close it and remove handle from class
+        """
+        if hasattr(self, 'preview_window'):
+            self.preview_window.close()
+            delattr(self, 'preview_window')
+
+
+    ## Slot functions for handling gui signals, e.g. clicked buttons etc. ##
+    @pyqtSlot(str)
     def on_camera_mode_change(self, text):
         """
         On camera mode change: re-select default cameras & disable/enable
@@ -514,6 +597,7 @@ class MainWindow(QMainWindow):
             self.preview.setEnabled(False)
             self.pixelFormat.setEnabled(False)
 
+    @pyqtSlot(int, int)
     def on_camera_check(self, row, col):
         """
         Handle change in camera check status. Specifically, handle single-cam
@@ -521,90 +605,157 @@ class MainWindow(QMainWindow):
         """
         self.set_camTable_selectivity(row)
 
+    @pyqtSlot()
     def on_fileselect_browse(self):
-        "Open save file dialog"
+        """
+        Open save file dialog
+        """
         dlg = QFileDialog()
         file = dlg.getSaveFileName()[0]
         self.outputFile.setText(file)
 
+    @pyqtSlot()
     def on_save_output_check(self):
         "Enable/disable 'Output Options' group box"
         # Options-group created BEFORE output-group so would error 1st time
         if hasattr(self, 'outputGroup'):
             self.outputGroup.setEnabled(self.saveOutput.isChecked())
 
+    @pyqtSlot()
+    @errorHandler
     def on_connect(self):
-        "Connect to cameras, hide window, and open runner window"
+        """
+        On Connect button click: Connect to cameras, initalise worker thread,
+        and maybe open preview window.
+        """
+        self.connectBtn.setEnabled(False)
 
         # Parse parameter values
-        settings = self.parse_settings()
-        if not settings:
-            return
-        print(settings)
+        self.extract_settings()
+        if not self.SETTINGS:
+            raise Exception('Failed to extract settings')
 
-        self.statusText.setText('Connected')
-        self.statusText.setStyleSheet('QLabel {color:green}')
+        # Connect
+        self.connect_cameras()
 
-        self.connectBtn.setEnabled(False)
-        self.startBtn.setEnabled(True)
+        # Init worker thread
+        self.worker = Worker(self)
+        self.worker.error.connect(self.on_error)
 
         # Init preview window?
         # NOTE - window instance must be assigned into this class to prevent
         # it getting immediately garbage collected!
-        if settings['preview']:
+        if self.SETTINGS['preview']:
             xPos = self.pos().x() + self.size().width()
             yPos = self.pos().y()
-            size = imgSize_from_vidMode(settings['cam_kwargs']['video_mode'])
+            size = imgSize_from_vidMode(
+                self.SETTINGS['cam_kwargs']['video_mode']
+                )
             self.preview_window = PreviewWindow(self, size, (xPos,yPos))
 
-    def on_start(self):
-        print('Start')
+            self.worker.output.connect(self.preview_window.setImage)
 
-        self.statusText.setText('Running')
-        self.statusText.setStyleSheet('QLabel {color:green}')
-
-        self.startBtn.setEnabled(False)
+        # Update window
+        self.setStatus('Connected', 'green')
+        self.startBtn.setEnabled(True)
         self.stopBtn.setEnabled(True)
 
-        if hasattr(self, 'preview_window'):
-            self.preview_window.setImage(TEST_IMAGE)  # XXX
 
+    @pyqtSlot()
+    @errorHandler
+    def on_start(self):
+        """
+        On Start button click:
+        """
+        print('Start')
+
+        self.startBtn.setEnabled(False)
+
+        for cam in self.CAM_HANDLES:
+            cam.startCapture()
+
+            # Sleep for a little bit to give cameras time to initialise before
+            # we start capture in thread
+            time.sleep(0.5)
+
+        self.stopBtn.setEnabled(True)
+
+        self.worker.start()
+        self.setStatus('Running', 'green')
+
+
+    @pyqtSlot()
     def on_stop(self):
+        """
+        On Stop button click:
+        """
         print('Stop')
 
-        self.statusText.setText('Disconnected')
-        self.statusText.setStyleSheet('QLabel {color:red}')
-
         self.stopBtn.setEnabled(False)
+
+        for cam in self.CAM_HANDLES:
+            try:
+                cam.stopCapture()
+            except:
+                pass
+            try:
+                cam.close()
+            except:
+                pass
+
+        if hasattr(self, 'worker'):
+            self.worker.KEEPGOING = False
+            self.worker.wait(5000)
+
+        self.setStatus('Disconnected', 'red')
+
         self.connectBtn.setEnabled(True)
 
-        if hasattr(self, 'preview_window'):
-            self.preview_window.close()
+        self.close_preview()
 
+    @pyqtSlot()
     def on_exit(self):
+        """
+        On Exit button click: as per stop, but also close all windows
+        """
         print('Exit')
-
-        if hasattr(self, 'preview_window'):
-            self.preview_window.close()
-
+        self.on_stop()
+        self.close_preview()
         self.close()
+
+    @pyqtSlot(Exception)
+    def on_error(self, err):
+        """
+        Generic slot for handling errors. Will close everything down and show
+        error message in dialog. Pass error instance as input argument.
+
+        The errorHandler dectorator uses this function.
+        """
+        errValue = str(err)
+        errType = str(type(err).__name__)
+        self.on_stop()
+        self.close_preview()
+        error_dlg(self, errValue, errType).exec_()
 
 
 class PreviewWindow(QMainWindow):
     "Class for video preview pop-up"
-    def __init__(self, parent, winsize=(640,480), pos=(0,0)):
+    def __init__(self, parent=None, winsize=(640,480), pos=(0,0)):
         super().__init__(parent)
         self.parent = parent
         self.winsize = winsize
         self.pos = pos
+
         self.initUI()
         self.show()
 
     def initUI(self):
         # Init window
         self.setWindowTitle('Preview')
-        self.resize(*self.winsize)
+        self.setFixedSize(*self.winsize)
         self.move(*self.pos)
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        self.setWindowFlag(Qt.WindowMinMaxButtonsHint, False)
 
         # Add label for pixmap, allocate as central widget
         self.imgQLabel = QLabel()
@@ -638,6 +789,46 @@ class PreviewWindow(QMainWindow):
         qimg = QImage(im.data, H, W, stride, fmt)
         qpixmap = QPixmap(qimg).scaled(self.imgQLabel.size(), Qt.KeepAspectRatio)
         self.imgQLabel.setPixmap(qpixmap)
+
+
+class Worker(QThread):
+    """
+    Runs cameras within parallel thread to prevent main application blocking
+    """
+    output = pyqtSignal(np.ndarray)
+    error = pyqtSignal(Exception)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.KEEPGOING = True
+
+    def __del__(self):
+        # Force python to wait for thread to finish before garbage collecting
+        self.KEEPGOING = False
+        self.wait()
+
+    def run(self):
+        try:
+            while self.KEEPGOING:
+                # Acquire images
+                for cam in self.parent.CAM_HANDLES:
+                    ret, img = cam.getImage()
+
+                # Display (single-cam + preview mode only)
+                if ret and hasattr(self.parent, 'preview_window'):
+                    # Possible bug fix - converting image to array TWICE seems to
+                    # prevent image corruption?!
+                    fmt = self.parent.SETTINGS['pixel_format']
+                    img2array(img, fmt)
+                    frame = img2array(img, fmt)
+                    self.output.emit(frame)
+
+        except Exception as e:
+            self.error.emit(e)
+
+        finally:
+            self.finished.emit()
 
 
 ### Run application ###
