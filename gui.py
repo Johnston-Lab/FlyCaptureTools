@@ -54,8 +54,46 @@ DEFAULTS = {'cam_mode':'Multi',
                              'strobePattern':Qt.Unchecked,
                              'ROIPosition':Qt.Unchecked} }
 
+# Supported PyCapture2 pixel formats (i.e. those which can be converted
+# to a PyQt QImage format)
+SUPPORTED_PIXEL_FORMATS = ['MONO8','RGB','RGB8','RGB16']
+
 
 ### External utility functions ###
+
+def convert_pixel_format(pixel_format):
+    """
+    Convery PyCapture2 pixel format into PyQt QImage format. Only some pixel
+    formats are supported: MONO8, RGB, RGB8, RGB16. Other formats will raise
+    an error.
+
+    Parameters
+    ----------
+    pixel_format : str
+        PyCapture2.PIXEL_FORMAT code or key for PIXEL_FORMATS lookup dict.
+
+    Returns
+    -------
+    qimage_format : int
+        QImage format code
+    """
+    # If code, lookup name from dict
+    if isinstance(pixel_format, int):
+        pixel_format = [k for k,v in PIXEL_FORMATS.items() if v == pixel_format]
+        if len(pixel_format) > 1:
+            raise RuntimeError('Multiple matching pixel format codes')
+        pixel_format = pixel_format[0]
+
+    # Match with qimage format
+    if pixel_format == 'MONO8':
+        return QImage.Format_Grayscale8
+    elif pixel_format in ['RGB','RGB8']:
+        return QImage.Format_RGB888
+    elif pixel_format == 'RGB16':
+        return QImage.Format_RGB16
+    else:
+        raise ValueError(f'No PyQt conversion for {pixel_format} format')
+
 def error_dlg(parent, msg, title='Error', icon=QMessageBox.Critical):
     "Return error dialog"
     dlg = QMessageBox(parent)
@@ -98,9 +136,11 @@ def errorHandler(func):
         try:
             return func(self, *args, **kwargs)
         except Exception as e:
-            errType, errValue, tb = sys.exc_info()
-            import traceback; traceback.print_tb(tb)  # TODO
-            self.on_error(e)
+            errValue = str(e)
+            errType = str(type(e).__name__)
+            self.on_stop()
+            self.close_preview()
+            error_dlg(self, errValue, errType).exec_()
     return wrapper
 
 
@@ -280,7 +320,7 @@ class MainWindow(QMainWindow):
         form.addRow('Preview', self.preview)
 
         self.pixelFormat = QComboBox()
-        self.pixelFormat.addItems(['RGB','MONO8'])
+        self.pixelFormat.addItems(SUPPORTED_PIXEL_FORMATS)
         self.pixelFormat.setCurrentText(DEFAULTS['pixel_format'])
         self.pixelFormat.setToolTip(
             'Colour mode for display: must be appropriate for video mode.\n'
@@ -640,7 +680,7 @@ class MainWindow(QMainWindow):
 
         # Init worker thread
         self.worker = Worker(self)
-        self.worker.error.connect(self.on_error)
+        #self.worker.error.connect(self.on_error)
 
         # Init preview window?
         # NOTE - window instance must be assigned into this class to prevent
@@ -651,7 +691,9 @@ class MainWindow(QMainWindow):
             size = imgSize_from_vidMode(
                 self.SETTINGS['cam_kwargs']['video_mode']
                 )
-            self.preview_window = PreviewWindow(self, size, (xPos,yPos))
+            self.preview_window = PreviewWindow(
+                self, self.SETTINGS['pixel_format'], size, (xPos,yPos)
+                )
 
             self.worker.output.connect(self.preview_window.setImage)
 
@@ -723,29 +765,22 @@ class MainWindow(QMainWindow):
         self.close_preview()
         self.close()
 
-    @pyqtSlot(Exception)
-    def on_error(self, err):
-        """
-        Generic slot for handling errors. Will close everything down and show
-        error message in dialog. Pass error instance as input argument.
-
-        The errorHandler dectorator uses this function.
-        """
-        errValue = str(err)
-        errType = str(type(err).__name__)
-        self.on_stop()
-        self.close_preview()
-        error_dlg(self, errValue, errType).exec_()
-
 
 class PreviewWindow(QMainWindow):
     "Class for video preview pop-up"
-    def __init__(self, parent=None, winsize=(640,480), pos=(0,0)):
+    def __init__(self, parent, pixel_format, winsize=(640,480), pos=(0,0)):
+        # Init parent
         super().__init__(parent)
+
+        # Allocate variables
         self.parent = parent
         self.winsize = winsize
         self.pos = pos
 
+        # Convert pixel format
+        self.qimg_format = convert_pixel_format(pixel_format)
+
+        # Init interface
         self.initUI()
         self.show()
 
@@ -769,24 +804,11 @@ class PreviewWindow(QMainWindow):
         Parameters
         ----------
         im : numpy array
-            Image as 2D (grayscale) or 3D (RGB) numpy array with uint8 dtype
+            Image as numpy array (probably 2D/mono or 3D/RGB uint8)
         """
         W, H = im.shape[:2]
         stride = im.strides[0]
-
-        if im.ndim == 3:
-            if im.shape[2] == 3:
-                fmt = QImage.Format_RGB888
-            elif im.shape[2] == 4:
-                fmt = QImage.Format_RGBA8888
-            else:
-                raise TypeError('Unknown colour format')
-        elif im.ndim == 2:
-            fmt = QImage.Format_Grayscale8
-        else:
-            raise TypeError('Unknown image format')
-
-        qimg = QImage(im.data, H, W, stride, fmt)
+        qimg = QImage(im.data, H, W, stride, self.qimg_format)
         qpixmap = QPixmap(qimg).scaled(self.imgQLabel.size(), Qt.KeepAspectRatio)
         self.imgQLabel.setPixmap(qpixmap)
 
