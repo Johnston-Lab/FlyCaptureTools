@@ -1,6 +1,6 @@
 # Uses pyinstaller to compile exectutable versions of python scripts
 
-$outbase = "./exectuables"
+$outbase = "./executables"
 
 ## gui.py
 # Compile executable
