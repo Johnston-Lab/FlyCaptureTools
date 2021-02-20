@@ -6,3 +6,4 @@ pandas      # only for analyse_timestamps.py
 matplotlib  # only for analyse_timestamps.py
 moviepy     # only for extract_embedded_image_info.py
 PyQt5       # only for gui.py
+pyinstaller # for compiling executables
