@@ -552,8 +552,6 @@ class MainWindow(QMainWindow):
             # Error if no outfile provided and return None
             if not outfile:
                 raise Exception('Must specify file name')
-                #error_dlg(self, 'Must specify filename if saving video').exec_()
-                #return
 
             writer_kwargs = {
                 'encoder':self.outputEncoder.currentText(),
