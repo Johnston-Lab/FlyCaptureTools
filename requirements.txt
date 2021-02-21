@@ -1,3 +1,4 @@
+python==3.6
 PyCapture2  # download from https://www.flir.co.uk/products/flycapture-sdk/
 numpy
 opencv>=3.0 # only for run_camera.py
