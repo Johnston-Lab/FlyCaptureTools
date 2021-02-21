@@ -158,6 +158,12 @@ Commandline flags
     Frame rate for image acquisition. Can be a PyCapture2.FRAMERATE code or a
     key for the FRAMERATES lookup dict. Defaults to 30 fps.
 
+--grab-mode
+    Grab mode for image acquisition. Can be a PyCapture2.GRAB_MODE code or a
+    key for the GRAB_MODES lookup dict. Defaults to BUFFER_FRAMES. Would not
+    recommend changing from this as the alternative (DROP_FRAMES) is highly
+    liable to drop frames (unsurprisingly).
+
 -o, --output
     Path to output video file. If omitted, video writer will not be opened
     and further output flags are ignored.
@@ -195,6 +201,7 @@ Commandline flags
     Also note that embedded timestamps MUST be enabled to get 1394 cycle
     timestamps in the CSV file, regardless of whether the information is to be
     taken from the CSV or pixels. Default is to embed timestamps only.
+    Pass flag without any arguments to disable embedded image info.
 
 --preview
     Specify flag to run a live display of the camera feed in an OpenCV window.
@@ -209,8 +216,8 @@ Commandline flags
     window. Defaults to 'BGR', which is appropriate both for conversion from
     the default RGB image acquisition space and for display in OpenCV.
 
-Example usage
--------------
+Example usage (Windows Powershell)
+----------------------------------
 # Run single camera, display live preview
 > python run_camera.py -c 0 --preview
 
@@ -226,7 +233,7 @@ Example usage
 # Timestamps are embedded in pixel data by default, but image must be
 # monochrome for the values to be usable. If also running a live preview,
 # the pixel format will need to be updated accordingly too.
-> python run_camera.py -c 0 -o test.avi --embed-image-info timestamp \\
+> python run_camera.py -c 0 -o test.avi --embed-image-info timestamp `
     --video-mode VM_640x480Y8  --preview --pixel-format MONO8
 
 """
@@ -260,7 +267,7 @@ Example usage
                         help='Bitrate. Only applicable for H264 format')
     parser.add_argument('--no-timestamps', action='store_false',
                         help='Specify to NOT save timestamps to csv')
-    parser.add_argument('--embed-image-info', nargs='+', default=['timestamp'],
+    parser.add_argument('--embed-image-info', nargs='*', default=['timestamp'],
                         choices=['all','timestamp','gain','shutter',
                                  'brightness','exposure','whiteBalance',
                                  'frameCounter','strobePattern','ROIPosition'],
@@ -271,12 +278,11 @@ Example usage
                         help='Image conversion format for live preview. '
                              'PyCapture2.PIXEL_FORMAT code or lookup key.')
 
-    args = parser.parse_args()
-
-    # If no args, print help and exit
     if not len(sys.argv) > 1:
         parser.print_help()
         sys.exit(0)
+
+    args = parser.parse_args()
 
     # Check avialable cameras
     AVAILABLE_CAMS = getAvailableCameras()

@@ -10,6 +10,7 @@ timestamps anyway, so I'm ignoring this for now.
 """
 
 import os
+import sys
 import csv
 import warnings
 import argparse
@@ -151,23 +152,22 @@ Commandline flags
 
 -o, --output (optional)
     Path(s) to output CSV file(s). A .csv extension will be appended if one
-    isn't provided. If no output files are provided, ones will be automatcially
+    isn't provided. If no output files are provided, ones will be automatically
     generated based on the names and locations of the input files.
 
-Example usage
--------------
+Example usage (Windows Powershell)
+----------------------------------
 # Process timestamps from a single clip
-> python extract_embedded_image_info.py -i clip0.avi -p timestamp \\
+> python extract_embedded_image_info.py -i clip0.avi -p timestamp `
     -o clip0-embedded_info.csv
 
 # Process timestamps from multiple clips
-> python extract_embedded_image_info.py -i clip0.avi clip1.avi -p timestamp \\
+> python extract_embedded_image_info.py -i clip0.avi clip1.avi -p timestamp `
     -o clip0-embedded_info.csv clip1-embedded_info.csv
 
 # If there are lots of clips, we can save on typing using wildcard expansion,
-# though we have to let the script allocate default output filenames.
-# This is platform specific. The following should work for Windows Powershell:
-> python extract_embedded_image_info.py -i (Get-ChildItem clip*.avi) \\
+# though we have to let the script allocate default output filenames
+> python extract_embedded_image_info.py -i (Get-ChildItem clip*.avi) `
     -p timestamp
 
 """
@@ -182,6 +182,10 @@ Example usage
                         help='List of properties to extract from frames')
     parser.add_argument('-o', '--output', nargs='+',
                         help='Path to output csv file(s)')
+
+    if not len(sys.argv) > 1:
+        parser.print_help()
+        sys.exit(0)
 
     args = parser.parse_args()
     infiles = args.input
@@ -235,3 +239,4 @@ Example usage
 
         # Close outfile and finish
         fd.close()
+

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Script analyses frame timestamps from csv files. Can have one or multiple
+Script analyses 1394 frame timestamps from csv files. Can have one or multiple
 cameras. Calcultes and plots frame durations, and synchrony between cameras
 (if there are multiple cameras).
 
@@ -24,28 +24,28 @@ Commandline flags
     can be specified multiple times to give a separate output file for each
     recording.
 
-Example usage
--------------
+Example usage (Windows Powershell)
+----------------------------------
 # Process timestamps for a single recording from a single camera
-> python analyse_timestamps.py -i clip0_cam0.csv -o clip0_single.xlsx
+> python analyse_timestamps.py -i clip0-cam0.csv -o clip0_single.xlsx
 
 # Process timestamps for a single recording from multiple cameras
-> python analyse_timestamps.py \\
-      -i clip0_cam0.csv clip0_cam1.csv clip0_cam2.csv -o clip0_multi.xlsx
+> python analyse_timestamps.py `
+    -i clip0-cam0.csv clip0-cam1.csv clip0-cam2.csv -o clip0_multi.xlsx
 
 # Process timestamps for multiple recordings from multiple cameras
-> python analyse_timestamps.py \\
-      -i clip0_cam0.csv clip0_cam1.csv clip0_cam2.csv -o clip0_multi.xlsx \\
-      -i clip1_cam0.csv clip1_cam1.csv clip1_cam2.csv -o clip1_multi.xlsx
+> python analyse_timestamps.py `
+    -i clip0-cam0.csv clip0-cam1.csv clip0-cam2.csv -o clip0_multi.xlsx `
+    -i clip1-cam0.csv clip1-cam1.csv clip1-cam2.csv -o clip1_multi.xlsx
 
-# If there are lots of files, we can save on typing with wildcard expansion.
-# This is platform specific. The following should work for Windows Powershell:
-> python analyse_timestamps.py \\
-    -i (Get-ChildItem clip0_cam*.csv) -o clip0_multi.xlsx \\
-    -i (Get-ChildItem clip1_cam*.csv) -o clip1_multi.xlsx
+# If there are lots of files, we can save on typing with wildcard expansion
+> python analyse_timestamps.py `
+    -i (Get-ChildItem clip0-cam*.csv) -o clip0_multi.xlsx `
+    -i (Get-ChildItem clip1-cam*.csv) -o clip1_multi.xlsx
 """
 
 import os
+import sys
 import re
 import argparse
 import warnings
@@ -110,6 +110,10 @@ parser.add_argument('-i', '--input', nargs='+', action='append', required=True,
                     help='Path(s) to input file(s). Specify once per recording.')
 parser.add_argument('-o', '--output-excel', action='append', required=True,
                     help='Path to output excel file. Specify once per recording.')
+
+if not len(sys.argv) > 1:
+    parser.print_help()
+    sys.exit(0)
 
 args = parser.parse_args()
 infiles = args.input
@@ -253,3 +257,4 @@ for i, (infile_group, out_xlfile) in enumerate(zip(infiles, out_xlfiles)):
         out_plotfile = out_xlfile.replace('.xlsx', '-synchrony.png')
         fig.savefig(out_plotfile, dpi=200, bbox_inches='tight')
         plt.close(fig)
+
