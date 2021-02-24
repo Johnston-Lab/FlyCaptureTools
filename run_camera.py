@@ -129,6 +129,17 @@ def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, preview=False,
     print('\nDone\n')
 
 
+def check_enumerated_value(x):
+    """
+    Enumerated values (video modes, pixel formats, etc.) should be able to be
+    given as either the lookup key (e.g. 'VM_640x480RGB') or the PyCapture2
+    code (e.g. 4). Argparse can only return one datatype though, so this func
+    is used to convert to codes to ints while keeping keys as strings
+    """
+    try:
+        return int(x)
+    except ValueError:
+        return x
 
 
 if __name__ == '__main__':
@@ -298,9 +309,9 @@ Example usage (Windows Powershell)
 
     # Extract args
     cam_nums = args.cam_nums
-    video_mode = args.video_mode
-    frame_rate = args.frame_rate
-    grab_mode = args.grab_mode
+    video_mode = check_enumerated_value(args.video_mode)
+    frame_rate = check_enumerated_value(args.frame_rate)
+    grab_mode = check_enumerated_value(args.grab_mode)
     outfile = args.output
     overwrite = args.overwrite
     output_encoder = args.output_encoder
@@ -310,7 +321,7 @@ Example usage (Windows Powershell)
     no_timestamps = args.no_timestamps
     embed_image_info = args.embed_image_info
     preview = args.preview
-    pixel_format = args.pixel_format
+    pixel_format = check_enumerated_value(args.pixel_format)
 
     # Error check
     if not cam_nums:
