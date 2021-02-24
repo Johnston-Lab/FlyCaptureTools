@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Contains functions for running camera capture (from either one or multiple
-cameras), and provides a commandline user interface.
-"""
 
 import os
 import sys
 import argparse
+import cv2
+import traceback
+import ctypes
 import keyboard
-from FlyCaptureUtils import Camera, img2array, getAvailableCameras
-
-# OpenCV only needed for (optional) live preview, so allow for not having it
-try:
-    import cv2
-    HAVE_OPENCV = True
-except ImportError:
-    HAVE_OPENCV = False
+import numpy as np
+from multiprocessing import Process, Event, Queue
+from queue import Full as QueueFull, Empty as QueueEmpty
+from FlyCaptureUtils import (Camera, img2array, imgSize_from_vidMode,
+                             imgDepth_from_pixFormat, getAvailableCameras)
 
 
 ### Class definitions ###
@@ -26,108 +22,112 @@ class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter,
     "Combines argparse formatters"
     pass
 
+class ParallelCamera(Process):
+    def __init__(self, start_event, stop_event, cam_num, cam_kwargs, outfile,
+                 writer_kwargs, pixel_format, *args, **kwargs):
+        """
+        Class supports running camera within parallel child process.
+
+        Arguments
+        ---------
+        start_event : multiprocessing.Event object
+            Child process will block after barrier till start event is set.
+            Allows main process to signal to start acquisition.
+        stop_event : multiprocessing.Event object
+            Child process will continue execution till stop event is set.
+            Allows main process to signal to stop acquisition.
+        cam_num, cam_kwargs
+            As per Camera class.
+        outfile, writer_kwargs
+            As per Camera.openVideoWriter function.
+        pixel_format : PyCapture2.PIXEL_FORMAT value or str
+            Format to convert image to for display. Can be one of the
+            PyCapture2.PIXEL_FORMAT codes, or a key for the PIXEL_MODES lookup
+            dict.
+        *args, **kwargs
+            Further arguments passed to multiprocessing.Process
+
+        Attributes
+        ----------
+        self.ready_event : multiprocessing.Event object
+            Will be set when camera initialisation has finished. Can be used
+            to signal main process when camera is ready to start acquisition.
+        self.frame_queue : multiprocessing.Queue object
+            Queue will pass images back up to main process for display.
+        self.error_queue : multiprocessing.Queue object
+            Queue will pass error instances back up to main process.
+        """
+        # Allocate args to class
+        self.start_event = start_event
+        self.stop_event = stop_event
+        self.cam_num = cam_num
+        self.cam_kwargs = cam_kwargs
+        self.outfile = outfile
+        self.writer_kwargs = writer_kwargs
+        self.pixel_format = pixel_format
+
+        # Init further internal attributes
+        self.ready_event = Event()
+        self.frame_queue = Queue(maxsize=1)
+        self.error_queue = Queue()
+
+        # Super call implements inheritance from multiprocessing.Process
+        super(ParallelCamera, self).__init__(*args, **kwargs)
+
+    def run(self):
+        """
+        Overwrite multiprocessing.Process.run method.  Gets called in its
+        place when the process's .start() method is called.
+        """
+        # Everything in try block to handle errors
+        try:
+            # Init cam
+            cam = Camera(self.cam_num, **self.cam_kwargs)
+
+            # Init video writer?
+            if self.outfile is not None:
+                cam.openVideoWriter(self.outfile, **self.writer_kwargs)
+
+            # Signal main process we're ready
+            self.ready_event.set()
+
+            # Wait for start event to signal go
+            self.start_event.wait()
+
+            # Go!
+            cam.startCapture()
+            while not self.stop_event.is_set():
+                ret, img = cam.getImage()
+                if ret:
+                    # Possible bug fix - converting image to array TWICE seems
+                    # to prevent image corruption?!
+                    img2array(img, self.pixel_format)
+                    frame = img2array(img, self.pixel_format)
+                    # Append to queue
+                    try:
+                        self.frame_queue.put_nowait(frame.copy())  # NB: copy
+                    except QueueFull:
+                        pass
+
+        # Error encountered - pass up to main process
+        except Exception as e:
+            self.error_queue.put(e)
+
+        # Finish - try to close cameras and queues. We need to cancel queue
+        # joining otherwise child process can block while trying to exit if
+        # queue wasn't completely flushed.
+        finally:
+            try:
+                cam.close()
+            except:
+                pass
+            self.frame_queue.close()
+            self.frame_queue.cancel_join_thread()
+            self.error_queue.close()
+            self.error_queue.cancel_join_thread()
+
 
 ### Function definitions ###
-
-def main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, preview=False,
-          pixel_format='BGR'):
-    """
-    Main function for single camera operation.
-
-    Parameters
-    ----------
-    cam_nums : list
-        List of camera numbers to use.
-    cam_kwargs : dict
-        Keyword arguments to Camera class (excluding cam_num)
-    base_outfile : str or None
-        Output video file name. If multiple cameras are specified, the camera
-        numbers will be appended to the filename. If only one camera is
-        specified, the filename will be used as is.
-    writer_kwargs : dict
-        Keyword arguments to Camera class's .openVideoWriter() method.
-    preview : bool, optional
-        If True, display live preview of video feed in OpenCV window. Only
-        allowable for single camera operation, and will raise an error if set
-        to True with multiple cameras. The default is False.
-    pixel_format : PyCapture2.PIXEL_FORMAT value or str, optional
-        Format to convert image to for preview display. Ignored if preview
-        is not True. The default is BGR.
-    """
-    # Check if we have one or multiple cameras
-    cam_mode = 'multi' if len(cam_nums) > 1 else 'single'
-
-    # Preview mode only supported for single cam operation
-    if cam_mode == 'multi' and preview:
-        raise Exception('Preview mode not supported for multi-camera operation')
-
-    # Need OpenCV for preview
-    if preview and not HAVE_OPENCV:
-        raise ImportError('OpenCV required for preview mode')
-
-    # Set up cameras
-    cams = []
-    for cam_num in cam_nums:
-        if (cam_mode == 'multi') and (base_outfile is not None):
-            _outfile, ext = os.path.splitext(base_outfile)
-            outfile = _outfile + f'-cam{cam_num}' + ext
-        else:
-            outfile = base_outfile
-
-        these_cam_kwargs = cam_kwargs.copy()
-        these_cam_kwargs['cam_num'] = cam_num
-
-        cam = Camera(**these_cam_kwargs)
-        if outfile:
-            cam.openVideoWriter(outfile, **writer_kwargs)
-
-        cams.append(cam)
-
-    # Report ready
-    print('Ready - Enter to begin')
-    keyboard.wait('enter')
-
-    # Open display window?
-    if preview:
-        winName = 'Preview'
-        cv2.namedWindow(winName)
-
-    # Start
-    for cam in cams:
-        cam.startCapture()
-
-    # Begin main loop
-    print('Running - Esc or q to quit')
-    KEEPGOING = True
-    while KEEPGOING:
-        # Acquire images
-        for cam in cams:
-            ret, img = cam.getImage()
-
-        # Display (single-cam + preview mode only)
-        if ret and preview:
-            # Possible bug fix - converting image to array TWICE seems to
-            # prevent image corruption?!
-            img2array(img, pixel_format)
-            frame = img2array(img, pixel_format)
-            cv2.imshow(winName, frame)
-            cv2.waitKey(1)
-
-        # Check for quit signal
-        if keyboard.is_pressed('esc') or keyboard.is_pressed('q'):
-            print('Quitting...')
-            KEEPGOING = False
-
-    # Stop and exit
-    for cam in cams:
-        cam.stopCapture()
-        cam.close()
-
-    if preview:
-        cv2.destroyWindow(winName)
-
-    print('\nDone\n')
-
 
 def check_enumerated_value(x):
     """
@@ -141,69 +141,302 @@ def check_enumerated_value(x):
     except ValueError:
         return x
 
+def get_screen_resolution():
+    """
+    Get resolution of primary display. Only works on Windows, but so does
+    PyCapture so should be okay.
+    """
+    user32 = ctypes.windll.user32
+    # https://docs.microsoft.com/en-gb/windows/win32/api/winuser/nf-winuser-getsystemmetrics
+    W, H = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    return W, H
+
+def single_main(cam_num, cam_kwargs, outfile, writer_kwargs, pixel_format):
+    """
+    Main function for single camera operation.
+
+    Parameters
+    ----------
+    cam_num : int
+        Camera numer to use
+    cam_kwargs : dict
+        Keyword arguments to Camera class (excluding cam_num)
+    outfile : str or None
+        Output video file
+    writer_kwargs : dict
+        Keyword arguments to Camera class's .openVideoWriter() method
+    pixel_format : PyCapture2.PIXEL_FORMAT value or str
+        Format to convert image to for display
+    """
+    # Init camera
+    cam = Camera(cam_num, **cam_kwargs)
+
+    # Init video writer?
+    if outfile is not None:
+        cam.openVideoWriter(outfile, **writer_kwargs)
+
+    # Report ready
+    print('Ready - Enter to begin')
+    keyboard.wait('enter')
+
+    # Open display window
+    winName = 'Display'
+    cv2.namedWindow(winName)
+    print('Running - Esc or q to quit')
+
+    # Start capture
+    cam.startCapture()
+
+    # Loop
+    while True:
+        ret, img = cam.getImage()
+        if ret:
+            # Possible bug fix - converting image to array TWICE seems to
+            # prevent image corruption?!
+            img2array(img, pixel_format)
+            frame = img2array(img, pixel_format)
+            cv2.imshow(winName, frame)
+            cv2.waitKey(1)
+
+        # Check for quit signal
+        if keyboard.is_pressed('esc') or keyboard.is_pressed('q'):
+            print('Quitting...')
+            break
+
+    # Stop capture
+    cam.stopCapture()
+
+    # Close camera and exit
+    cam.close()
+    cv2.destroyWindow(winName)
+    print('\nDone\n')
+
+
+def multi_main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
+    """
+    Main function for multiple camera operation.
+
+    Parameters
+    ----------
+    cam_nums : list
+        List of camera numbers to use.
+    cam_kwargs : dict
+        Keyword arguments to Camera class (excluding cam_num).
+    base_outfile : str or None
+        Base output video file path. Will adjust to append camera numbers.
+    writer_kwargs : dict
+        Keyword arguments to Camera class's .openVideoWriter() method.
+    pixel_format : PyCapture2.PIXEL_FORMAT value or str
+        Format to convert image to for display.
+    """
+    # Imports only needed for this function
+    import inspect, time
+
+    # Set up viewport for display
+    nCams = len(cam_nums)
+    nRows = np.floor(np.sqrt(nCams)).astype(int)
+    nCols = np.ceil(nCams/nRows).astype(int)
+
+    if cam_kwargs['video_mode']:
+        imgW, imgH = imgSize_from_vidMode(cam_kwargs['video_mode'])
+    else:
+        sig = inspect.signature(Camera)
+        default_vid_mode = sig.parameters['video_mode'].default
+        imgW, imgH = imgSize_from_vidMode(default_vid_mode)
+
+    imgD = imgDepth_from_pixFormat(pixel_format)
+
+    viewport = np.zeros([imgH*nRows, imgW*nCols, imgD], dtype='uint8').squeeze()
+
+    # Set up events and barriers
+    nCams = len(cam_nums)
+    start_event = Event()
+    stop_event = Event()
+
+    # Set up camera processes
+    parCams = []
+    for cam_num in cam_nums:
+        if base_outfile is not None:
+            _outfile, ext = os.path.splitext(base_outfile)
+            outfile = _outfile + f'-cam{cam_num}' + ext
+        else:
+            outfile = None
+
+        these_cam_kwargs = cam_kwargs.copy()
+        these_cam_kwargs['cam_num'] = cam_num
+
+        parCam = ParallelCamera(start_event, stop_event, cam_num, cam_kwargs,
+                                outfile, writer_kwargs, pixel_format,
+                                name=f'cam{cam_num}')
+        parCam.start()
+        parCams.append(parCam)
+
+    # Wait till all child processes signal ready
+    timeout = 5
+    all_ready = [False] * nCams
+    t0 = time.time()
+    KEEPGOING = True
+    while KEEPGOING:
+        for i, parCam in enumerate(parCams):
+            all_ready[i] = parCam.ready_event.is_set()
+            try:
+                e = parCam.error_queue.get_nowait()
+                print(f'Camera ({parCam.name}) errored during initialisation')
+                print(e)
+                KEEPGOING = False
+                break
+            except QueueEmpty:
+                pass
+        if all(all_ready) or time.time() - t0 >= timeout:
+            KEEPGOING = False
+
+    # If initialisation failed, terminate child processes and exit
+    if not all(all_ready):
+        failed_cams = [parCam.name for success, parCam in \
+                       zip(all_ready, parCams) if not success]
+        print('Following cameras failed to initialise: ' + ', '.join(failed_cams))
+        print('Terminating all camera processes and exiting')
+        stop_event.set()
+        start_event.set()
+        for parCam in parCams:
+            parCam.join(timeout=5)
+            if (parCam.exitcode is None) or (parCam.exitcode < 0):
+                parCam.terminate()
+        return
+
+    # Wait to begin
+    print('Ready - Enter to begin')
+    keyboard.wait('enter')
+
+    # Open display window - size it to fit within monitor (while keeping
+    # viewport aspect ratio) and position in centre
+    winName = 'Display'
+    cv2.namedWindow(winName, cv2.WINDOW_NORMAL)
+
+    screenSize = get_screen_resolution()
+    viewportSize = viewport.shape[:2][::-1]
+    if viewportSize[0] > viewportSize[1]:  # landscape
+        winW = min(viewportSize[0], int(round(0.9 * screenSize[0])))
+        winH = int(round(viewportSize[1] * winW/viewportSize[0]))
+    else:  # portrait
+        winH = min(viewportSize[1], int(round(0.9 * screenSize[1])))
+        winW = int(round(viewportSize[0] * winH/viewportSize[1]))
+    winSize = (winW, winH)
+    cv2.resizeWindow(winName, *winSize)
+
+    screenMid = [ss//2 for ss in screenSize]
+    winMid = [ws//2 for ws in winSize]
+    origin = (screenMid[0] - winMid[0], screenMid[1] - winMid[1])
+    cv2.moveWindow(winName, *origin)
+
+    # Send go signal
+    start_event.set()
+
+    # Begin display loop - all in try block so we can kill child processes in
+    # case of main process error
+    print('Running - Esc to quit')
+    try:
+        KEEPGOING = True
+        while KEEPGOING:
+            for i, parCam in enumerate(parCams):
+                # Check for error in child process - exit if found
+                if not parCam.is_alive():
+                    msg = f'Camera ({parCam.name}) died, exiting'
+                    try:
+                        e = parCam.error_queue.get(timeout=1)
+                        msg += '\n' + str(e)
+                    except QueueEmpty:
+                        pass
+                    raise RuntimeError(msg)
+
+                # Try to retrieve frame from child process
+                try:
+                    frame = parCam.frame_queue.get_nowait()
+                except QueueEmpty:
+                    continue
+
+                # Allocate to array
+                y,x = np.unravel_index(i, (nRows, nCols))
+                viewport[y*imgH:(y+1)*imgH, x*imgW:(x+1)*imgW, ...] = frame
+
+            # Display
+            cv2.imshow(winName, viewport)
+            cv2.waitKey(1)
+
+            # Check for quit signal
+            if keyboard.is_pressed('esc') or keyboard.is_pressed('q'):
+                print('Quitting...')
+                KEEPGOING = False
+
+    # Main process encountered error - print it
+    except Exception:
+        traceback.print_exc()
+
+    # Finish up - stop cameras, clear window, and exit
+    finally:
+        # Stop
+        stop_event.set()
+
+        # Clear window and exit
+        cv2.destroyWindow(winName)
+        for parCam in parCams:
+            parCam.join(timeout=5)
+            if (parCam.exitcode is None) or (parCam.exitcode < 0):
+                print('Force terminating {parCam.name}')
+                parCam.terminate()
+
+    print('\nDone\n')
+
 
 if __name__ == '__main__':
     doc="""
-Script for running camera acquisition.
+Script for running camera acquisition and providing a live display.
 
-Can either run from commandline, or import main function for custom usage.
+Can either run from commandline, or import functions for custom usage.
 
 Commandline flags
 -----------------
 -h
     Show this help message and exit.
-
 --ls
     List available cameras and exit.
-
 -c, --cam-nums
     Space delimited list of cameras to use, or 'all' to use all available
     cameras. Use --ls flag to see available cameras.
-
 --video-mode
     Determines resolution and colour space for image acquisition. Can be a
     PyCapture2.VIDEO_MODE code or a key for the VIDEO_MODES lookup dict.
     Defaults to 640x480 resolution and RGB colour space.
-
 --frame-rate
     Frame rate for image acquisition. Can be a PyCapture2.FRAMERATE code or a
     key for the FRAMERATES lookup dict. Defaults to 30 fps.
-
 --grab-mode
     Grab mode for image acquisition. Can be a PyCapture2.GRAB_MODE code or a
     key for the GRAB_MODES lookup dict. Defaults to BUFFER_FRAMES. Would not
     recommend changing from this as the alternative (DROP_FRAMES) is highly
     liable to drop frames (unsurprisingly).
-
 -o, --output
     Path to output video file. If omitted, video writer will not be opened
     and further output flags are ignored.
-
 --overwrite
     If output file already exists, will be overwritten if flag is specified,
     or an error will be raised if flag is omitted.
-
 --output-encoder
     Encoder for output file: AVI, MJPG, or H264. If omitted, will attempt to
     determine from output file extension.
-
 --output-quality
     Quality of output video: integer in range 0 to 100. Only applicable for
     MJPG encoder.
-
 --output-size
     Space delimited list giving image width and height (in pixels). Only
     applicable for H264 encoder. Must match resolution specified in video
     mode. If omitted, will attempt to determine from video mode.
-
 --output-bitrate
     Bitrate for output file. Only applicable for H264 encoder. If omitted,
     will use default value (see FlyCaptureUtils.Camera class).
-
 --no-timestamps
     If specified, will NOT write timestamps (contained within image metadata)
     to csv file alongside output video file.
-
 --embed-image-info
     Space delimited list of image properties to embed in top-left image pixels.
     See PyCaputre2 documentation or FlyCaptureUtils.Camera.openVideoWriter
@@ -213,11 +446,6 @@ Commandline flags
     timestamps in the CSV file, regardless of whether the information is to be
     taken from the CSV or pixels. Default is to embed timestamps only.
     Pass flag without any arguments to disable embedded image info.
-
---preview
-    Specify flag to run a live display of the camera feed in an OpenCV window.
-    Note this is only available for single (not multi) camera operation.
-
 --pixel-format
     Determines colour conversion for image display. Only applicable if preview
     mode is enabled. Can be a PyCapture2.PIXEL_FORMAT code or a key for the
@@ -229,8 +457,8 @@ Commandline flags
 
 Example usage (Windows Powershell)
 ----------------------------------
-# Run single camera, display live preview
-> python run_camera.py -c 0 --preview
+# Run single camera
+> python run_camera.py -c 0
 
 # Run single camera, save to video file
 > python run_camera.py -c 0 -o test.avi
@@ -242,10 +470,10 @@ Example usage (Windows Powershell)
 > python run_camera.py -c all -o test.avi
 
 # Timestamps are embedded in pixel data by default, but image must be
-# monochrome for the values to be usable. If also running a live preview,
-# the pixel format will need to be updated accordingly too.
+# monochrome for the values to be usable. The pixel format used for the live
+# preview will need to be updated accordingly too.
 > python run_camera.py -c 0 -o test.avi --embed-image-info timestamp `
-    --video-mode VM_640x480Y8  --preview --pixel-format MONO8
+    --video-mode VM_640x480Y8 --pixel-format MONO8
 
 """
     # Parse args
@@ -283,10 +511,8 @@ Example usage (Windows Powershell)
                                  'brightness','exposure','whiteBalance',
                                  'frameCounter','strobePattern','ROIPosition'],
                         help='List of properties to embed in image pixels')
-    parser.add_argument('--preview', action='store_true',
-                        help='Show live preview (single camera mode only)')
     parser.add_argument('--pixel-format', default='BGR',
-                        help='Image conversion format for live preview. '
+                        help='Image conversion format for display. '
                              'PyCapture2.PIXEL_FORMAT code or lookup key.')
 
     if not len(sys.argv) > 1:
@@ -320,7 +546,6 @@ Example usage (Windows Powershell)
     output_bitrate = args.output_bitrate
     no_timestamps = args.no_timestamps
     embed_image_info = args.embed_image_info
-    preview = args.preview
     pixel_format = check_enumerated_value(args.pixel_format)
 
     # Error check
@@ -330,9 +555,16 @@ Example usage (Windows Powershell)
     # Process and format args
     if 'all' in cam_nums:
         cam_nums = sorted([num_ser[0] for num_ser in AVAILABLE_CAMS])
-        print('Using: ' + ', '.join([f'cam{n}' for n in cam_nums]))
     else:
         cam_nums = list(map(int, cam_nums))
+
+    if len(cam_nums) > 1:
+        mode = 'multi'
+        print('Running multiple cameras in parallel')
+    else:
+        mode = 'single'
+        cam_nums = cam_nums[0]  # unlist
+        print('Running single camera')
 
     cam_kwargs = {}
     if video_mode is not None:
@@ -346,15 +578,19 @@ Example usage (Windows Powershell)
     if outfile:
         writer_kwargs['overwrite'] = overwrite
         writer_kwargs['encoder'] = output_encoder
-        if output_quality is not None:
-            writer_kwargs['quality'] = output_quality
-        if output_size is not None:
+        if args.output_quality is not None:
+            writer_kwargs['quality'] =output_quality
+        if args.output_size is not None:
             writer_kwargs['img_size'] = output_size
-        if output_bitrate is not None:
+        if args.output_bitrate is not None:
             writer_kwargs['bitrate'] = output_bitrate
-        if embed_image_info is not None:
+        if args.embed_image_info is not None:
             writer_kwargs['embed_image_info'] = embed_image_info
         writer_kwargs['csv_timestamps'] = no_timestamps  # False if flag IS specified
 
     # Go
-    main(cam_nums, cam_kwargs, outfile, writer_kwargs, preview, pixel_format)
+    if mode == 'single':
+        main = single_main
+    elif mode == 'multi':
+        main = multi_main
+    main(cam_nums, cam_kwargs, outfile, writer_kwargs, pixel_format)
