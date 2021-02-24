@@ -3,16 +3,13 @@
 Provides tools for running simultaneous video capture from the Elephant multi-camera rig. Uses the PyCapture2 Python bindings to the FlyCapture2 SDK.
 
 ## Table of contents
-
----
-
 - [FlyCaptureUtils](#flycaptureutils)
   - [Table of contents](#table-of-contents)
   - [Installation](#installation)
     - [Dependencies](#dependencies)
     - [Installation](#installation-1)
-    - [Compiling executables](#compiling-executables)
   - [Repository contents](#repository-contents)
+    - [Compiling executables](#compiling-executables)
   - [Usage](#usage)
     - [Runner scripts](#runner-scripts)
       - [Commandline runner](#commandline-runner)
@@ -25,15 +22,11 @@ Provides tools for running simultaneous video capture from the Elephant multi-ca
 
 
 ## Installation
-
----
-
 > All necessary packages should already be installed on the Elephant computer. These instructions may be useful if any packages ever need re-installing, or if you want to run the code on a different computer.
 
 > The code has only been tested on Windows. The PyCapture2 module is also provided for Linux, but I've no idea if the code will work on it. Mac OS is completely unsupported. The Elephant computer currently runs Windows 10.
 
 ### Dependencies
-
 To begin with, you will need the following software installed:
 - FlyCapture2 SDK
 - Python 3.6 (or newer if PyCapture2 support is added in future)
@@ -57,7 +50,6 @@ In addition, further Python packages are required for specific scripts:
   - pyinstaller
 
 ### Installation
-
 Most of the Python packages come pre-installed with the Anaconda distribution, or can be installed via the conda and/or pip package managers. We'll assume you're using the Anaconda distribution - the details below can be easily enough adapted for other distributions.
 
 First, install Python 3.6 (at the time of writing, this is the most recent version supported for the PyCapture2 package, though you might install a newer version if support has since been added). If you're happy with this being the main environment you can just go ahead and install it.
@@ -104,16 +96,7 @@ The PyCapture2 isn't available in conda or pip, and must be installed manually. 
    5. The *PyCapture2* directory in the unpacked location also has some useful contents, including documentation.
 
 
-### Compiling executables
-
-Support is provided for compling the GUI runner script (**`gui.py`**) to an executable that can be run from the file browser. The executable files themselves are quite large, so are not included with the git repository itself. Instead, the **`compile_executables.ps1`** powershell script can be run to build the executable within your local copy of the repository. The outputs will be stored in an *executables* directory created within the repository, but the executable file itself can also be accessed from the shortcut created in the top-level of the repository.
-
-
-
 ## Repository contents
-
----
-
 - **`docs/`** : Contains this README and some documentation pdfs from PointGrey for the cameras and PyCapture2 module.
 - **`analyse_timestamps.py`** : Analyses 1394 cycle timestamps from CSV (either those saved directly by the video writer, or extracted from embedded pixel data - see *extract_embedded_image_info.py*). This can be used to check the achieved frame rate, and (with multiple-camera operation) the synchrony between cameras.
 - **`compile_exectuables.ps1`** : Powershell script can be used to compile GUI runner script to an executable file.
@@ -122,17 +105,15 @@ Support is provided for compling the GUI runner script (**`gui.py`**) to an exec
 - **`gui.py`** : GUI-based runner script. If *compile_executables.ps1* is run, you can also use the executable version. Convenience script for running cameras. Equivalent functionality via a commandline interface is provided by *run_camera.py*.
 - **`run_camera.py`** : Commandline-based runner script. Convenience script for running cameras. Equivalent functionality via a graphical interface is provided by *<span>gui.py</span>*.
 
+### Compiling executables
+Support is provided for compling the GUI runner script (**`gui.py`**) to an executable that can be run from the file browser. The executable files themselves are quite large, so are not included with the git repository itself. Instead, the **`compile_executables.ps1`** powershell script can be run to build the executable within your local copy of the repository. The outputs will be stored in an *executables* directory created within the repository, but the executable file itself can also be accessed from the shortcut created in the top-level of the repository.
+
 
 ## Usage
-
----
-
 ### Runner scripts
-
 The easiest way to operate the cameras is by the provided runner scripts. We offer 2 options: a commandline interface, and a graphical interface.
 
 #### Commandline runner
-
 The **`run_camera.py`** script provides a commandline-based interface. It accepts numerous commandline flags to control the camera operation.
 
 We can use the `-h|--help` flag to print the help and usage information.
@@ -145,7 +126,13 @@ We can use `--ls` flag to check which cameras are connected. This lists the came
 python run_camera.py --ls
 ```
 ```
-TODO 
+Cam     Serial
+0       10360385
+1       10321222
+2       10360388
+3       10360311
+4       10360392
+5       10360391 
 ```
 
 We can run one or more cameras by using the `-c|--cam-nums` flag, following it with the numbers of the cameras we want to use. Alternatively, we can simply specify the string `all` to run all connected cameras. For a single camera, we can also display a live preview of the video feed (note this is unsupported for multi-camera operation). Let's try running a live preview from the first connected camera.
@@ -154,9 +141,9 @@ python run_camera.py -c 0 --preview
 ```
 Once the camera has initialised, a message will be printed informing you that you can press the *Enter* key to begin. Once the camera starts running, you can press the *Esc* key to quit.
 
-By default, the camera acquires images in RGB colour space, at a resolution of 640x480 pixels, and at 30 fps. We can use the `--video-mode` flag to change the colour mode and/or video resolution. Note that not all possible modes are supported by the camera. If we still want to run a live preview, we might also need to use the `--pixel-format` flag to change the colour conversion for the display to something appropriate for the new colour mode. Finally, the `--frame-rate` flag can be used to change the frame rate. Only some frame rates are supported, and these may change according to the video mode. See the PyCapture2 manual for a list of the possible codes for these flags (under the *Enumerated Values* section). Let's try running the camera in grayscale.
+By default, the camera acquires images in RGB colour space, at a resolution of 640x480 pixels, and at 30 fps. We can use the `--video-mode` flag to change the colour mode and/or video resolution. Note that not all possible modes are supported by the camera. If we still want to run a live preview, we might also need to use the `--pixel-format` flag to change the colour conversion for the display to something appropriate for the new colour mode. Finally, the `--frame-rate` flag can be used to change the frame rate. Only some frame rates are supported, and these may change according to the video mode. See the PyCapture2 manual for a list of the possible codes for these flags (under the *Enumerated Values* section). Let's try running the camera in monochrome.
 ```sh
-python run_camera.py -c 0 --video-mode VM_640x480Y8 --preview --pixel-mode MONO8
+python run_camera.py -c 0 --video-mode VM_640x480Y8 --preview --pixel-format MONO8
 ```
 
 More often, we'll want to save the video to an output file. We can specify a path to an output file using the `-o|--output` flag. PyCapture2 offers three encoders: AVI, MJPG, and H264. However, only the AVI encoder seems reliable, so the others are best avoided. We can set the encoder explicitly using the `--output-encoder` flag, but it's easier just to append a **.avi** extension to the output file in which case the code will automatically work out to use the AVI encoder. By default the video writer will error if the file already exists, but if you really want you can disable the error overwrite the file anyway by specifying the `--overwrite` flag.
@@ -173,12 +160,11 @@ python run_camera.py -c all -o ./my_video.avi
 ```
 
 #### GUI runner
-
 Alternatively, the **`gui.py`** script provides a graphical interface. If you run the **`compile_executables.ps1`** powershell script then you can also acess the GUI via the generated executable file.
 
 The GUI contains a number of panels that can be used to configure and run the camera(s). Hovering the mouse over (most) fields will display a tooltip with further information.
 
-![TODO update image in lab](./images/GUI_overview.png)
+![Main window during setup](./images/GUI-main_window-setup.png)
 
 - **Select Cameras** : This panel can be used to choose which camera(s) to use. It will list the camera numbers and corresponding serial numbers of all connected cameras.
   - ***Camera mode*** : Sets whether to acquire from just one (*Single*) or multiple (*Multi*) cameras.
@@ -213,13 +199,13 @@ The general workflow of the GUI would be as follows:
 4. When you want to stop, click the **Stop** button to stop the video acquisition and disconnect the cameras. The status will return to indicating the cameras are disconnected. The preview window will be closed if enabled.
 5. When you are completely finished, click the **Exit** button to exit the application. This wil also stop the video acquisition and disconnect the cameras (if this hasn't already been done).
 
-> TODO: insert image of GUI running with preview window
+![Main window with single camera running](./images/GUI-main_window-running.png)
+![Preview window with single camera running](./images/GUI-preview_window-running.png)
 
 If the application encounters an error at any point, it will automatically stop the video acquisition and disconnect the cameras, and display the error message in a dialog box.
 
 
 ### Custom usage
-
 If the runner scripts don't do what you want, you can use the functions and classes within the **`FlyCaptureUtils.py`** module to write your own custom python code.
 
 The `Camera` class can be used to interface with one of the cameras. Pass the number of the camera you wish to connect to the `cam_num` argument; see the docstring for explanations of further arguments.
@@ -247,6 +233,7 @@ for i in range(300):
         arr = img2array(img)  # doing twice seems to prevent image corruption?
         cv2.imshow('Display', arr)
         cv2.waitKey(1)
+cv2.destroyWindow('Display')
 ```
 
 When you are done, call the `.close` method. This will stop the video acquisition, close any open video writers, and disconnect the camera.
@@ -255,21 +242,21 @@ cam.close()
 ```
 
 ### Embedding image information
-The video writer provides the option of embedding key bits of information (e.g. 1394 cycle timestamps) in the pixel data. This is done by writing the values into the first few pixels (top left corner) of each frame. Each value is stored as a 32-bit unsigned integer spread across groups of 4 pixels (4 x 8-bit unsigned integers). So if only one field (e.g. timestamps) is stored, the first 4 pixels will be occupied. If two fields are stored (e.g. timestamps and gain), the first 8 pixels will be occupied. There are up to 10 fields that can be stored, potentially occupying up to the first 40 pixels. This is described in more detail on pages 78-80 of the *flir-machine-vision-camera-register-reference.pdf* document.
+The video writer provides the option of embedding key bits of information (e.g. 1394 cycle timestamps) in the pixel data. This is done by writing the values into the first few pixels (top left corner) of each frame. Each value is stored as a 32-bit unsigned integer spread across groups of 4 pixels (4 x 8-bit unsigned integers). So if only one field (e.g. timestamps) is stored, the first 4 pixels will be occupied. If two fields are stored (e.g. timestamps and gain), the first 8 pixels will be occupied. There are up to 10 fields that can be stored, potentially occupying up to the first 40 pixels. This is described in more detail on pages 78-80 of the *flir-machine-vision-camera-register-reference* PDF document.
 - By default, we enable embedding 1394 cycle timestamps as this is necessary to also obtain them from the metadata (see [Checking timestamps](#checking-timestamps)).
-- For the embedded pixel information to be usable, the images must be in grayscale (set the video mode to **VM_640x480Y8**). This is because the cameras apply Bayer colour processing to colour images, which alters the pixel values and corrupts the embedded data.
+- For the embedded pixel information to be usable, the images must be monochrome (set the video mode to **VM_640x480Y8**). This is because the cameras apply Bayer colour processing to colour images, which alters the pixel values and corrupts the embedded data.
 
 > **WARNING:** Because the first few pixels are encoding image information, they are *not* encoding the recorded scene. As a result, they must be removed prior to performing any video analysis. Strictly speaking you only need to remove the leftmost pixels as these are the only ones encoding the information, but in practice it will probably be easier to just remove the entire top row.
 
 
 ### Checking timestamps
 It is important to check the frame timestamps to account for dropped frames and (in the case of multi-camera operation) adjust for asynchronies between the cameras. PyCapture2 allows extracting two types of timestamps (one useful, one not), and the useful type can be extracted from two different places.
-1. **CPU timestamps** are available from the frame metadata. These will be included in the CSV timestamps created by the video writer (if this option is enabled). These aren't especially useful though as they only represent the time at which the frame was processed by the computer, *not* the time at which the frame was actually acquired. As such, they will only be moderately accurate.
-2. **1394 cycle timestamps** give the time directly from the firewire bus, and reflect the exact moment the frame was acquired (the moment the shutter exposure ended, to be exact). They are accurate to sub-millisecond levels, and hence are much more useful. These can be obtained from the image meta-data written to the timestamps CSV file (though see caveat below), or can be embedded in the video pixel data and extracted later.
+1. **CPU timestamps** are available from the frame metadata. These will be included in the timestamps CSV created by the video writer (if this option is enabled). These aren't especially useful though as they only represent the time at which the frame was processed by the computer, *not* the time at which the frame was actually acquired. As such, they will only be moderately accurate.
+2. **1394 cycle timestamps** give the time directly from the firewire bus, and reflect the exact moment the frame was acquired (the moment the shutter exposure ended, to be exact). They are accurate to sub-millisecond levels, and hence are much more useful. These can also be obtained from the image metadata written to the timestamps CSV file (though see caveat below), or can be embedded in the video pixel data and extracted later (but the video must be monochrome for them to be usable).
 
-> Not sure if it's a feature or a bug of PyCapture2, but the 1394 cycle timestamps are only provided in the image metadata *if* the option to embed them in the pixel data is also enabled. This means that to use them, you must enable embedding timestamps in the pixel data regardless of whether you actually want to extract the pixel data or simply use the metadata written to the CSV file. If the embedded timestamps are not enabled, the 1394 cycle timestamps in the metadata will simply list a value of zero for all frames.
+> Not sure if it's a bug or a feature of PyCapture2, but the 1394 cycle timestamps are only provided in the image metadata *if* the option to embed them in the pixel data is also enabled. This means that to use them, you must enable embedding timestamps in the pixel data regardless of whether you actually want to extract the pixel data or simply use the metadata written to the CSV file. If the embedded timestamps are not enabled, the 1394 cycle timestamps in the metadata will simply list a value of zero for all frames.
 
-> The 1394 timestamps are provided in somewhat confusing units. They are described in more detail on page 79 of the *flir-machine-vision-camera-register-reference.pdf* document. The timestamps are given in 3 columns: second count, cycle count, and cycle offset. The second count is measured in seconds cycling between 0 and 127; after 127 it loops back round to 0. The cycle count is measured in units of 1/8000th of a second (125 microsecond intervals), such that the value may lie between 0 and 7999. The cycle offset is measured in units of 1/3072nd of a cycle count (1/24,576,000th of a second, or approximately 40 nanosecond intervals), such that the value may lie between 0 and 3071. To extract the full timestamp in seconds: unwrap the second count, convert the cycle counts and offsets to seconds, and then add all of them together.
+> The 1394 timestamps are provided in somewhat confusing units. They are described in more detail on page 79 of the *flir-machine-vision-camera-register-reference* PDF document. The timestamps are given in 3 columns: second count, cycle count, and cycle offset. The second count is measured in seconds cycling between 0 and 127; after 127 it loops back round to 0. The cycle count is measured in units of 1/8000th of a second (125 microsecond intervals), such that the value may lie between 0 and 7999. The cycle offset is measured in units of 1/3072nd of a cycle count (1/24,576,000th of a second, or approximately 40 nanosecond intervals), such that the value may lie between 0 and 3071. To extract the full timestamp in seconds: unwrap the second count, convert the cycle counts and offsets to seconds, and then add all of them together.
 
 You can use the **`extract_embedded_image_info.py`** script to to extract the 1394 cycle timestamps embedded in the pixel data to a CSV file, or you can use the values from the metadata already stored in the video writer's CSV file.
 
@@ -299,15 +286,25 @@ python analyse_timestamps.py `
   -i (Get-ChildItem clip1-cam*.csv) -o clip1_multi.xlsx
 ```
 
-> In practice, there is likely to be some degree of asynchrony between the cameras durng multi-camera operation. This is because each camera is started in turn, and it also takes a slightly variable amount of time for each one to get going. If you want to analyse frames across cameras together, you will need to correct for this asynchrony in post-processing. If the asynchrony remains constant throughout the recording (e.g. there are no odd frame drops) then this may be as simple as cutting all the clips to a common onset. If the asynchonry varies (which it might, e.g. if one camera drops a frame) then the correction may require some more effort (e.g. interpolating between dropped frames).
+> In practice, there is likely to be some degree of asynchrony between the cameras durng multi-camera operation. This is because there is a small time delay between starting each camera in turn, and it also takes a slightly variable amount of time for each one to get going once started. If you want to analyse frames across cameras together, you will need to correct for this asynchrony in post-processing. If the asynchrony remains constant throughout the recording (e.g. there are no odd frame drops) then this may be as simple as cutting all the clips to a common onset. If the asynchonry varies (which it might, e.g. if one camera drops a frame) then the correction may require some more effort (e.g. interpolating between dropped frames).
 
 ### Tips
 - It is best to keep the recordings short - perhaps record for just a few seconds at a time, stopping and starting the recording between each sequence. The recorded video files can become corrupted if the camera process crashes and fails to properly exit - running them in short bursts will reduce the chances of data loss. It will also help reduce storage requirements (long video files will be very large).
-- Because there is no option to run a video preview during multi-camera operation, you won't be able to line up your shot after the recording starts. Instead, you should check the shot on each camera individually before you start recording. You can do this using the runner scripts provided here and enabling the video preview, but it might be easier to use the **Point Grey FlyCap2** program provided with the FlyCapture2 SDK.
-  > TODO insert images here
+- Because there is no option to run a video preview during multi-camera operation, you won't be able to line up your shot after the recording starts. Instead, you should check the shot on each camera individually before you start recording. You can do this using the runner scripts provided here and enabling the video preview, but it might be easier to use the **Point Grey FlyCap2** program provided with the FlyCapture2 SDK:
+  1. Open the **Point Grey FlyCap2** program.
+  2. Choose the desired camera from the camera selection list, and either double click on it within the table, or select it and click the *OK* button.
+  3. A preview window will be opened showing the camera feed.
+  4. You can return to the camera selection window by click the *Select a new camera* button in the top left (the camera icon).
+  ![Point Grey FlyCap2 - Camera selection window](images/FlyCap2-camera_selection.png)
+  ![Point Grey FlyCap2 - Video preview](images/FlyCap2-preview.png)
 - Also because there is no video preview during multi-camera operation, you won't be able to see what was recorded until it's been recorded. It might be a good idea to open up a few of the videos in your favourite video player as you go to check that everything looks okay.
 - You can use the **Point Grey FlyCap2** program provided with the FlyCapture2 SDK to check what video modes and frame rates are supported by the cameras.
-  > TODO: insert screenhot
+  1. Open the **Point Grey FlyCap2** program.
+  2. Choose the desired camera from the camera selection list, and click on *Configure Selected*.
+  3. Navigate to the *Standard Video Modes* tab on the left.
+  4. This displays the range of resolutions and colour modes available for the camera, and accompanying frame rates.
+  5. By default, the camera will probably be set to run in RGB colour at 640x480 resolution, and at 30 fps. But we can see that other colour modes are available, including 8-bit monochrome (Y8), 16-bit monochrome (Y16), and some YUV formats. For RGB colour, both higher (60 fps) and lower (down to 1.875 fps) framerates are available. For YUV422 format, a lower camera resolution is available, which if selected will allow an even higher framerate of 120 fps. By playing around with these options, you can see what combinations of settings are available for the camera. You can then translate these to the `VIDEO_MODE` and `FRAMERATE` codes used for the python scripts (see PyCapture2 documentation for a list of the codes).
+    ![Point Grey FlyCap2 - Camera configuration](images/FlyCap2-camera_configuration.png)
 - The uncompressed video files are very large. The Elephant rig computer has a spare 1TB hard drive that is otherwise unoccuppied, and will be good for storing the video. This is registered as the **D:\\** drive. However, even this will fill up quickly if you leave the videos lying around on it. This drive is best used for temporary storage during a recording session, but you should aim to move these videos to a higher-capacity storage location as soon as possible (e.g. one of the lab's network drives).
 
 ## Why isn't the video preview supported for multi-camera operation?
