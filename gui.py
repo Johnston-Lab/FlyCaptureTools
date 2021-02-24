@@ -549,7 +549,7 @@ class MainWindow(QMainWindow):
         if self.saveOutput.isChecked():
             outfile = self.outputFile.text()
 
-            # Error if no outfile provided and return None
+            # Error if no outfile provided
             if not outfile:
                 raise Exception('Must specify file name')
 
@@ -560,11 +560,6 @@ class MainWindow(QMainWindow):
                 'quality':self.outputQuality.value(),
                 'bitrate':self.outputBitrate.value(),
                 }
-
-            if self.outputEncoder.currentText() == 'Auto':
-                writer_kwargs['encoder'] = None
-            else:
-                writer_kwargs['encoder'] = self.outputEncoder.currentText()
 
             if self.outputEncoder.currentText() == 'Auto':
                 writer_kwargs['encoder'] = None
@@ -627,8 +622,8 @@ class MainWindow(QMainWindow):
         applicable).  Application events are processed periodically so that
         the app doesn't lock up.
 
-        Set .KEEPGOING attribute to False to end capture. Will then disconnect
-        cameras and close preview window (if applicable).
+        Set .KEEPGOING attribute to False to end capture and disconnect
+        cameras.
         """
         # Start cameras
         for cam in self.CAM_HANDLES:
@@ -652,9 +647,6 @@ class MainWindow(QMainWindow):
 
             # Refresh app (e.g. to check for button events)
             QApplication.processEvents()
-
-        # Close preview window
-        self.close_preview()
 
         # Attempt to close cameras
         failed_cams = []
@@ -727,7 +719,7 @@ class MainWindow(QMainWindow):
 
         # Parse parameter values
         self.extract_settings()
-        if not self.SETTINGS:
+        if not hasattr(self, 'SETTINGS'):
             raise Exception('Failed to extract settings')
 
         # Connect
@@ -765,9 +757,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def on_stop(self):
         """
-        On Stop button click: stop capture.
+        On Stop button click: stop capture & close preview window.
         """
         self.KEEPGOING = False  # set KEEPGOING flag False to stop capture
+        self.close_preview()
         self.stopBtn.setEnabled(False)
         self.set_status('Disconnected', 'red')
         self.connectBtn.setEnabled(True)
@@ -775,10 +768,9 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def on_exit(self):
         """
-        On Exit button click: as per stop, but also close all windows
+        On Exit button click: as per stop, but also close main window.
         """
         self.on_stop()
-        self.close_preview()
         self.close()
 
 
