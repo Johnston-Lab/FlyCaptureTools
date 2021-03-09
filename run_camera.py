@@ -382,7 +382,7 @@ def multi_main(cam_nums, cam_kwargs, base_outfile, writer_kwargs, pixel_format):
         for parCam in parCams:
             parCam.join(timeout=5)
             if (parCam.exitcode is None) or (parCam.exitcode < 0):
-                print('Force terminating {parCam.name}')
+                print(f'Force terminating {parCam.name}')
                 parCam.terminate()
 
     print('\nDone\n')
